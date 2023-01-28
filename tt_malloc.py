@@ -17,7 +17,8 @@ class tt_malloc:
         self.free_block_index_tensor = torch.randperm(num_blocks, dtype=torch.int64)
 
     def allocate_tensor(self, addr_tensor):
-        tensor_length = list(addr_tensor.flatten().shape)[0]
+        addr_tensor_shape = addr_tensor.shape
+        tensor_length = list(addr_tensor.flatten(start_dim=2,end_dim=-1).shape)[-1]
 
         assert list(self.free_block_index_tensor.shape)[0] > tensor_length, "Error: asking for more blocks than left in free list"
 
@@ -28,11 +29,12 @@ class tt_malloc:
         self.free_block_index_tensor = self.free_block_index_tensor[tensor_length:]
 
         # reshape and assign to the address tensor - allocation done!
-        addr_tensor = blocks.reshape(addr_tensor.shape)
+        addr_tensor = blocks.reshape(addr_tensor.shape[2:])
+        addr_tensor = addr_tensor.broadcast_to(addr_tensor_shape)
         return addr_tensor
 
     def deallocate_tensor(self, addr_tensor):
         # flatten the tensor to be de-allocated, and add it to the free list tensor - de-allocation done
-        self.free_block_index_tensor = torch.cat((self.free_block_index_tensor, addr_tensor.flatten()))
+        self.free_block_index_tensor = torch.cat((self.free_block_index_tensor, addr_tensor[0][0].flatten()))
 
 

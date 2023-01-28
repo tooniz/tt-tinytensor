@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as functional
 
+tt_path_flag = False
 def linear(acts, weights, bias, output=None):
     out = functional.linear(acts,weights,bias)
     if(output != None):
@@ -60,3 +61,13 @@ def reduce_max(input, dim, output=None):
     if(output != None):
         output.copy_(out)
     return out
+
+######
+# Shape manipulation
+def view_local(input, view_spec):
+    if(not tt_path_flag):
+        return input.view(view_spec)
+
+def permute_local(input, permute_spec):
+    if(not tt_path_flag):
+        return input.permute(permute_spec)

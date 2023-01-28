@@ -28,7 +28,7 @@ def alloc_dealloc_test():
         c_mul = torch.randint(low=1,high=32,size=(1,1)).item()
 
         # make total dim count random
-        dims = torch.randint(low=2,high=6,size=(1,1)).item()
+        dims = torch.randint(low=4,high=8,size=(1,1)).item()
 
         # make other dim values relatively small and random
         dim_list = []
@@ -50,7 +50,7 @@ def alloc_dealloc_test():
             dim_list[-2] = int(dim_list[-2]/block_size)
             assert bla.addr_shape == tuple(dim_list), "tt_tensor init from torch tensor, address shape not equal to expected"
 
-        # delete and de-allcotae tt_tensor
+        # delete and de-allocate tt_tensor
         del(bla)
 
         # check that the allocator is back to being empty after de-allocating
