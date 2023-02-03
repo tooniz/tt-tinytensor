@@ -34,7 +34,7 @@ class tt_netlist:
             # go through the current r_c slice and define queue
             rdim = list(tensor.address_tensor.shape[-2])[0]
             cdim = list(tensor.address_tensor.shape[-1])[0]
-            self.add_op(name = rqname, type = 'ram', block_size = tensor.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = tensor.data_format, dram= tensor.get_dram_list(current_slice))
+            self.add_op(name = rqname, type = 'ram', block_size = tensor.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = tensor.dtype, dram= tensor.get_dram_list(current_slice))
             self.queue_counter = self.queue_counter + 1
 
 
@@ -70,9 +70,9 @@ class tt_netlist:
         # go through the current r_c slice and define queue
         rdim = list(l_input.address_tensor.shape[-2])[0]
         cdim = list(l_input.address_tensor.shape[-1])[0]
-        self.add_op(name = rqname+'_lin', type = 'ram', block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = l_input.data_format, dram= l_input.get_dram_list(slice))
-        self.add_op(name = rqname+'_rin', type = 'ram', block_size = r_input.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = r_input.data_format, dram= r_input.get_dram_list(slice))
-        self.add_op(name = rqname+'_out', type = 'ram', block_size = output.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = output.data_format, dram= output.get_dram_list(slice))
+        self.add_op(name = rqname+'_lin', type = 'ram', block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = l_input.dtype, dram= l_input.get_dram_list(slice))
+        self.add_op(name = rqname+'_rin', type = 'ram', block_size = r_input.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = r_input.dtype, dram= r_input.get_dram_list(slice))
+        self.add_op(name = rqname+'_out', type = 'ram', block_size = output.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = output.dtype, dram= output.get_dram_list(slice))
 
         # make graphs and ops for current tensor slices
 
