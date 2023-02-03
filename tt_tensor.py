@@ -1,14 +1,15 @@
 import torch
 from tt_malloc import tt_malloc
 from tt_simd_cluster import tt_simd_cluster
+from tt_simd_cluster import tt_dtype
 
 class tt_tensor(): 
-    def __init__(self, block_size: int, allocator: tt_malloc, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, data_format='Bfp8_b'):
+    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Bfp8_b):
         # save local references for block size, the dram allocator and chip grid
-        self.allocator = allocator
         self.simd_cluster = simd_cluster
         self.block_size = block_size
-        self.data_format = data_format
+        self.virtual_block_size = block_size
+        self.dtype = dtype
 
         # Tiny Tensors can be initialized via a torch tensor
         if(torch_tensor != None):
@@ -25,7 +26,7 @@ class tt_tensor():
         self.address_tensor = torch.empty(self.addr_shape)
 
         # Call the allocator to get the new tensor filled with allocated DRAM addresses
-        self.address_tensor = allocator.allocate_tensor(self.address_tensor)
+        self.address_tensor = simd_cluster.allocate_tensor(self.address_tensor)
 
         # Initialize 'transpose lowest two dimensions' flag to False
         self.transpose_r_c = False
@@ -33,7 +34,18 @@ class tt_tensor():
     def __del__(self):
         # once tt_tensor goes out of scope
         # de-allocate space you had reserved via the attached tt allocator
-        self.allocator.deallocate_tensor(self.address_tensor)
+        self.simd_cluster.deallocate_tensor(self.address_tensor)
+
+    def get_dram_list(self, tensor_slice):
+        flat_addr_tensor = self.address_tensor.flatten(start_dim=2,end_dim=-3)
+        bit_mask = torch.full(flat_addr_tensor[0,0,tensor_slice].shape,7,dtype=torch.int64)
+        channel = torch.bitwise_and(flat_addr_tensor[0,0,tensor_slice], bit_mask)
+        shift = torch.full((1,),3,dtype = torch.int64)
+        addr = torch.bitwise_right_shift(flat_addr_tensor[0,0,tensor_slice], shift)
+        list_a = channel.flatten().tolist()
+        list_b = addr.flatten().tolist()
+        return list(map(list, zip(list_a, list_b)))
+
 
     def to_device(self, torch_in: torch.Tensor):
         # go through all chips and call tilize
@@ -42,9 +54,6 @@ class tt_tensor():
     def from_device(self):
         # collect tensor back from chips
         pass
-
-    def deallocate(self):
-        self.allocator.deallocate_tensor(self.address_tensor)
 
     def split(self):
         pass
