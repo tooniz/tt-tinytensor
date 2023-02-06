@@ -1,11 +1,33 @@
 import torch
 import random
+import logging
 from tt_simd_cluster import tt_simd_cluster
 from tt_simd_cluster import tt_dtype
 from tt_tensor import tt_tensor
 
+def duplicate_alloc_test():
+    logging.info("Testing that multiple calls to set up allocator with same setting results in one allocator being set up!")
+
+    simd0  = tt_simd_cluster(2,2,(0,1,2,3))
+    num_alloc_blocks = 10
+
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,64,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,64,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,64,num_alloc_blocks,0)])
+
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,32,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,32,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,32,num_alloc_blocks,0)])
+
+    simd0.set_up_allocators([(tt_dtype.Float16_b,64,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Float16_b,64,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Float16_b,64,num_alloc_blocks,0)])
+
+    # check that the above all resulted in a single allocators dictionary entry in simd cluster
+    assert len(simd0.allocators) == 3
+
 def simd_malloc_test():
-    print("Testing TT SIMD Cluster Malloc Machinery!")
+    logging.info("Testing TT SIMD Cluster Malloc Machinery!")
     simd0 = tt_simd_cluster(4,8, list(range(4*8)))
 
     # set up spaces to randomly sample
@@ -47,10 +69,10 @@ def simd_malloc_test():
         # check the blocks in the free list are unique
         unique = torch.unique(allocator.free_block_index_tensor)
         assert unique.shape == allocator.free_block_index_tensor.shape, "Error: the free list got poluted, with duplicate blocks"
-
-    print("Successfully allocated: ", i+1, " tensors")
+    logging.info("Successfully allocated: ", i+1, " tensors")
 
 def main():
+    duplicate_alloc_test()
     simd_malloc_test()
 
 if __name__ == "__main__":

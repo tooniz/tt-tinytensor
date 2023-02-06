@@ -18,6 +18,10 @@ class tt_malloc:
         # addresses when reading/writing the hardware
         self.free_block_index_tensor = torch.randperm(num_blocks, dtype=torch.int64)
 
+        # multiply randomly permuted integers by block size and add to dram_bot to get actual block base addresses
+        self.free_block_index_tensor = self.free_block_index_tensor * int(self.block_size_bytes)
+        self.free_block_index_tensor = self.free_block_index_tensor + int(dram_bot)
+
     def allocate_tensor(self, addr_tensor):
         addr_tensor_shape = addr_tensor.shape
         tensor_length = list(addr_tensor.flatten(start_dim=2,end_dim=-1).shape)[-1]
