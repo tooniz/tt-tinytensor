@@ -26,7 +26,7 @@ class tt_tensor():
         self.address_tensor = torch.empty(self.addr_shape)
 
         # Call the allocator to get the new tensor filled with allocated DRAM addresses
-        self.address_tensor = simd_cluster.allocate_tensor(self.address_tensor)
+        self.address_tensor = simd_cluster.allocate_tensor(self)
 
         # Initialize 'transpose lowest two dimensions' flag to False
         self.transpose_r_c = False
@@ -34,7 +34,7 @@ class tt_tensor():
     def __del__(self):
         # once tt_tensor goes out of scope
         # de-allocate space you had reserved via the attached tt allocator
-        self.simd_cluster.deallocate_tensor(self.address_tensor)
+        self.simd_cluster.deallocate_tensor(self)
 
     def get_dram_list(self, tensor_slice):
         flat_addr_tensor = self.address_tensor.flatten(start_dim=2,end_dim=-3)

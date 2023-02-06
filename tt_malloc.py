@@ -11,6 +11,8 @@ class tt_malloc:
         # Block size associated with this allocator
         self.block_size_bytes    = block_size_bytes
 
+        self.num_blocks = num_blocks
+
         # fill free list tensor with randomized but unique block indices
         # these will be used to generate physical channels and within-channel
         # addresses when reading/writing the hardware

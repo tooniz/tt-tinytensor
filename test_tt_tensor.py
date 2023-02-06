@@ -1,6 +1,7 @@
 import torch
 from tt_tensor import tt_tensor
 from tt_simd_cluster import tt_simd_cluster
+from tt_simd_cluster import tt_dtype
 from tt_malloc import tt_malloc
 
 ####
@@ -23,6 +24,8 @@ def alloc_dealloc_test():
         # first pick block size
         possible_block_size = (32,64,128,256,512,1024)
         block_size = possible_block_size[torch.randint(low=0,high=6,size=(1,1)).item()]
+        simd0.set_up_allocators([(tt_dtype.Bfp8_b,block_size,100000,0)])
+
         # make R,C shape a multiple of the block size
         r_mul = torch.randint(low=1,high=32,size=(1,1)).item()
         c_mul = torch.randint(low=1,high=32,size=(1,1)).item()
@@ -41,11 +44,11 @@ def alloc_dealloc_test():
         if(torch.randint(low=0,high=2,size=(1,1)).item()):
             dim_list[-1] = int(dim_list[-1]/block_size)
             dim_list[-2] = int(dim_list[-2]/block_size)
-            bla = tt_tensor(block_size=block_size, allocator=alloc0, simd_cluster=simd0, torch_tensor=None, shape=tuple(dim_list))
+            bla = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list))
             assert bla.addr_shape == tuple(dim_list), "tt_tensor init from shape tuple, address shape not equal to expected"
         else:
             torch_tens = torch.randn(tuple(dim_list))
-            bla = tt_tensor(block_size=block_size, allocator=alloc0, simd_cluster=simd0, torch_tensor=torch_tens, shape=None)
+            bla = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=torch_tens)
             dim_list[-1] = int(dim_list[-1]/block_size)
             dim_list[-2] = int(dim_list[-2]/block_size)
             assert bla.addr_shape == tuple(dim_list), "tt_tensor init from torch tensor, address shape not equal to expected"
