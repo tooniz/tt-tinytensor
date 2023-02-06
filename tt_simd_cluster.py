@@ -10,11 +10,16 @@ class tt_dtype(Enum):
     Float16_b = 5
     Float32 = 6
 
+class tt_math_fidelity(Enum):
+    LoFi = 1
+    HiFi = 2
+
 class tt_op_dtype():
-    def __init__(self, dtype, dype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b):
+    def __init__(self, dtype, dype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b, fidelity: tt_math_fidelity = tt_math_fidelity.HiFi):
         self.dt = dtype
         self.dt_int = dype_intermed
         self.dt_acc = dtype_accum
+        self.fidelity = fidelity
 
 def block_size_bytes(dtype, block_size, debug=False):
     tile_size_dict = {}

@@ -1,11 +1,19 @@
-from tt_tensor import tt_tensor
+import yaml
+from enum import Enum
+
 from tt_tensor import tt_tensor
 from tt_simd_cluster import tt_simd_cluster
-from tt_malloc import tt_malloc
-import yaml
+from tt_simd_cluster import tt_dtype
+from tt_simd_cluster import tt_op_dtype
+from tt_simd_cluster import tt_math_fidelity
 
-tt_net_op_types  = {"matmul": 'matmul','add': 'add','subtract': 'subtract','multiply': 'multiply','queue': 'queue','ram': 'ram'}
-tt_math_fidelity = {"LoFi": 'LoFi'}
+class tt_net_op_types(Enum):
+    matmul = 1
+    add = 2
+    subtract = 3
+    multiply = 4
+    queue = 5
+    ram = 6
 
 class tt_netlist:
     def __init__(self):
@@ -37,54 +45,62 @@ class tt_netlist:
             self.add_op(name = rqname, type = 'ram', block_size = tensor.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = tensor.dtype, dram= tensor.get_dram_list(current_slice))
             self.queue_counter = self.queue_counter + 1
 
-
-    def binary_tensor_op(self, l_input, r_input, dtype):
+    def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype):
         # make output tensor
-        out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape)
+        out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape, dtype=op_dtype.dt)
 
-        # flatten out the dimensions that will be iterated through for computation
-        l_input_flat = l_input.flatten(start_dim=2,end_dim=-3)
-        r_input_flat = r_input.flatten(start_dim=2,end_dim=-3)
-        output_flat = out_tens.flatten(start_dim=2,end_dim=-3)
-
-        iterations = l_input_flat.shape[2]
-        for i in range(iterations):
-            self.binary_slice_op(i, l_input[0,0,i], r_input[0,0,i], out_tens[0,0,i])
+        self.binary_slice_op(op, l_input, r_input, out_tens, op_dtype)
 
         self.dump_netlist()
 
         # compile dumped netlist
-        self.l_input.simd_cluster.compile_netlist()
+        # self.l_input.simd_cluster.compile_netlist()
 
         # run netlist
-        self.l_input.simd_cluster.run_netlist()
+        # self.l_input.simd_cluster.run_netlist()
 
         # return output tiny tensor
         return out_tens
 
-    def binary_slice_op(self, slice, l_input, r_input, output):
-        # make queues for current tensor slices
-        name = 'queue'
-        rqname = name + "_" + str(slice)
+    def binary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
+        # flatten out the dimensions that will be iterated through for computation
+        l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
+        r_input_flat = r_input.address_tensor.flatten(start_dim=2,end_dim=-3)
+        output_flat = output.address_tensor.flatten(start_dim=2,end_dim=-3)
 
-        # go through the current r_c slice and define queue
-        rdim = list(l_input.address_tensor.shape[-2])[0]
-        cdim = list(l_input.address_tensor.shape[-1])[0]
-        self.add_op(name = rqname+'_lin', type = 'ram', block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = l_input.dtype, dram= l_input.get_dram_list(slice))
-        self.add_op(name = rqname+'_rin', type = 'ram', block_size = r_input.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = r_input.dtype, dram= r_input.get_dram_list(slice))
-        self.add_op(name = rqname+'_out', type = 'ram', block_size = output.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = output.dtype, dram= output.get_dram_list(slice))
+        iterations = l_input_flat.shape[2]
+
+        op_name = op.name
+        queue_name = 'queue'
+        for slice in range(iterations):
+            # make rams/queues for current tensor slices
+            slice_queue_name = queue_name + "_" + str(slice)
+            slice_op_name = op_name + "_" + str(slice)
+
+            # go through the current r_c slice and define queue
+            rdim = l_input.address_tensor.shape[-2]
+            cdim = l_input.address_tensor.shape[-1]
+            self.add_op(name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
+            self.add_op(name = slice_queue_name+'_rin', type = tt_net_op_types.ram, block_size = r_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(r_input.dtype), dram= r_input.get_dram_list(slice))
+            self.add_op(name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice))
 
         # make graphs and ops for current tensor slices
+        for slice in range(iterations):
+            # make rams/queues for current tensor slices
+            slice_queue_name = queue_name + "_" + str(slice)
+            slice_op_name = op_name + "_" + str(slice)
+            rdim = output.address_tensor.shape[-2]
+            cdim = output.address_tensor.shape[-1]
 
-        pass
+            self.add_op(name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype)
 
-    def add_op(self, name: str, type: str, \
+    def add_op(self, name: str, type: tt_net_op_types, \
             block_size: int, \
             grid_size: list, \
             inputs: list, # use inputs[0] as queue/ram input
-            out_df: str, # out_df must be supplied for all
             \
-            in_df: list = None, intermed_df: str = None, acc_df: str = None, math_fidelity: str = None,
+            op_dtype: tt_op_dtype,
+            in_df: list = None,
             \
             entries: int = 1,
             target_device: int = 0,
@@ -109,7 +125,7 @@ class tt_netlist:
         mblock = [block_size_tiles, block_size_tiles]
 
         # fill in required op/queue/ram descriptor fields
-        op_val_dict['type'] = type
+        op_val_dict['type'] = type.name
         op_val_dict['grid_loc'] = grid_loc
         op_val_dict['grid_size'] = grid_size
         op_val_dict['mblock'] = mblock
@@ -117,7 +133,12 @@ class tt_netlist:
         op_val_dict['ublock_order'] = ublock_order
         op_val_dict['t'] = 1
 
-        if(type == 'queue' or type == 'ram'):
+        out_df = op_dtype.dt.name
+        acc_df = op_dtype.dt_acc.name
+        intermed_df = op_dtype.dt_int.name
+        math_fidelity = op_dtype.fidelity.name
+
+        if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             op_val_dict['input'] = inputs[0]
             op_val_dict['entries'] = entries
             op_val_dict['target_device'] = target_device
@@ -126,13 +147,13 @@ class tt_netlist:
             op_val_dict['df'] = out_df
         else:
             op_val_dict['inputs'] = inputs
-            op_val_dict['in_df'] = in_df
+            op_val_dict['in_df'] = list(map(lambda x:x.name,in_df)) #convert list of dtype objects to list of strings
             op_val_dict['out_df'] = out_df
             op_val_dict['intermed_df'] = intermed_df
             op_val_dict['acc_df'] = acc_df
             op_val_dict['math_fidelity'] = math_fidelity
 
-        if(type == 'matmul'):
+        if(type == tt_net_op_types.matmul):
             attributes = True
             attributes_dict['m_k'] = m_k
             attributes_dict['u_kt'] = u_kt
@@ -156,8 +177,10 @@ class tt_netlist:
             op_val_dict['attributes'] = attributes_dict
 
         # assign op val dictionary to the single entry op dict
-        if(type == 'queue' or type == 'ram'):
+        if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             self.doc['queues'][name] = op_val_dict
+        else:
+            self.doc['graphs'][name] = op_val_dict
 
     def dump_netlist(self):
         pass
@@ -170,7 +193,8 @@ class tt_netlist:
 def main():
     simd0  = tt_simd_cluster(2,2,(0,1,2,3))
     num_alloc_blocks = 100000
-    alloc0 = tt_malloc(32, num_alloc_blocks, 0)
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,64,num_alloc_blocks,0)])
+    simd0.set_up_allocators([(tt_dtype.Bfp8_b,128,num_alloc_blocks,0)])
 
     netlist0 = tt_netlist()
 
@@ -179,20 +203,17 @@ def main():
     dim_list1 = (1,2,3,4,4)
     dim_list2 = (1,2,3,2,2)
 
-    bla0 = tt_tensor(block_size=block_size, allocator=alloc0, simd_cluster=simd0, torch_tensor=None, shape=tuple(dim_list0))
-    bla1 = tt_tensor(block_size=block_size, allocator=alloc0, simd_cluster=simd0, torch_tensor=None, shape=tuple(dim_list1))
-    bla2 = tt_tensor(block_size=block_size, allocator=alloc0, simd_cluster=simd0, torch_tensor=None, shape=tuple(dim_list2))
+    bla0 = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list0))
+    bla1 = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list1))
+    bla2 = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list2))
 
-    netlist0 = tt_netlist()
-    current_slice = (0,1,2)
-    netlist0.add_queues(name='tigrutin', tensors=[bla0,bla1,bla2], current_slice=current_slice)
-    netlist0.add_queues(name='fahrutin', tensors=[bla2], current_slice=current_slice)
-    netlist0.add_queues(name='fahrutin2', tensors=[bla2], current_slice=current_slice)
+    out_tensor = netlist0.binary_tensor_op(tt_net_op_types.matmul, bla0, bla1, tt_op_dtype(tt_dtype.Bfp8_b))
     netlist0.dump_netlist()
 
     del(bla0)
     del(bla1)
     del(bla2)
+    del(out_tensor)
 
 if __name__ == "__main__":
     print("Testing TT netlist api")

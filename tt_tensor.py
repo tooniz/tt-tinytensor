@@ -14,16 +14,16 @@ class tt_tensor():
         # Tiny Tensors can be initialized via a torch tensor
         if(torch_tensor != None):
             # account for blocking and make dimensions -1, -2 smaller by factor of block size
-            self.addr_shape = tuple(torch_tensor.shape[:-2] + (int(torch_tensor.shape[-2]/block_size),int(torch_tensor.shape[-1]/block_size)))
+            self.shape = tuple(torch_tensor.shape[:-2] + (int(torch_tensor.shape[-2]/block_size),int(torch_tensor.shape[-1]/block_size)))
         else:
             # or via a specifically supplied shape
             if(shape != None):
-                self.addr_shape = shape
+                self.shape = shape
             else:
                 assert False, "Need to either pass a torch tensor with a reference shape, or pass an explicit shape to tt_tensor init"
 
         # initialize empty tensor with the right shape
-        self.address_tensor = torch.empty(self.addr_shape)
+        self.address_tensor = torch.empty(self.shape)
 
         # Call the allocator to get the new tensor filled with allocated DRAM addresses
         self.address_tensor = simd_cluster.allocate_tensor(self)
