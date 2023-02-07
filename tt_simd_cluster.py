@@ -1,6 +1,10 @@
 import logging
 from tt_malloc import tt_malloc
 from enum import Enum
+import eager_backend.backend_api as be_api
+from test_utils import py_desc, py_tensor
+from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
+from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
 
 class tt_dtype(Enum):
     Bfp2_b = 1
@@ -83,10 +87,10 @@ class tt_simd_cluster():
         pass
 
     def write_tensor_slice_to_dram(self, chip_id, data, chan, address):
-        self.dram_accessor.write_tensor_slice(chip_id, data, chan, address)
+        self.dram_accessor.write_tensor_slice(chip_id=chip_id, data=data, chan=chan, addr=address)
 
     def read_tensor_slice_from_dram(self, chip_id, data_shape, chan, address):
-        self.dram_accessor.read_tensor_slice(chip_id, data_shape, chan, address)
+        return self.dram_accessor.read_tensor_slice(chip_id, data_shape, chan, address)
 
     def set_up_allocators(self, alloc_list: list): # list of 4 entry tuples (dtype, block size, number of blocks, base_address)
         for alloc_data in alloc_list:

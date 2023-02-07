@@ -46,14 +46,15 @@ class tt_tensor():
         list_b = addr.flatten().tolist()
         return list(map(list, zip(list_a, list_b)))
 
-    def get_dram_chan_tensor_slice(self, slice: int):
+    def get_dram_addr_tensor_slice(self, slice: int):
         # just return the indices for initial test
         addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3)
         return addr_tensor_flat[0][0][slice]
 
-    def get_dram_addr_tensor_slice(self, slice: int):
+    def get_dram_chan_tensor_slice(self, slice: int):
         # put everything in channel one for initial test
-        chan_tens = torch.ones((address_tensor[-2], address_tensor[-1]))
+        chan_tens = torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
+        return chan_tens
 
     def to_device(self, chip_id: int, torch_in: torch.Tensor):
         # Check that incoming tensor dimensions match the tt_tensors
@@ -64,15 +65,15 @@ class tt_tensor():
 
         # write out all slices
         for slice in range(iterations):
-            tt_simd_cluster.write_tensor_slice_to_dram(chip_id, torch_in_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice))
+            self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=torch_in_flat[0][0][slice], chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
 
-    def from_device(self):
+    def from_device(self, chip_id):
         # Generate flat view of tensor dims except for chip dims and 2D slices
         addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3)
         iterations = addr_tensor_flat.shape[2]
 
         # create read target tensor
-        tensor_shape = list(self.addr_tensor.shape)
+        tensor_shape = list(self.address_tensor.shape)
         tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
         tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
         read_tensor = torch.empty(tensor_shape)
@@ -82,7 +83,7 @@ class tt_tensor():
         
         # read back all slices
         for slice in range(iterations):
-            read_tensor_flat[0][0][slice] = tt_simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice))
+            read_tensor_flat[0][0][slice] = self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice))
 
         return read_tensor_flat
 

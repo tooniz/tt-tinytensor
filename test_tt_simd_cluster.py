@@ -26,6 +26,30 @@ def duplicate_alloc_test():
     # check that the above all resulted in a single allocators dictionary entry in simd cluster
     assert len(simd0.allocators) == 3
 
+def grayskull_read_write_test():
+    import time
+    import torch
+    import eager_backend.backend_api as be_api
+    from test_utils import py_desc, py_tensor
+    from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
+    from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
+
+    target_arch = BackendDevice.Grayskull
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices)
+
+    simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
+    simd0.set_up_allocators([(tt_dtype.Float32, 128, 1000, 0x21000000)])
+
+    tens = torch.randn((1,1,1,1024,1024))
+    tt_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
+    tt_tens.to_device(0,tens)
+    ble = tt_tens.from_device(0)
+    print(torch.allclose(tens,ble))
+    print(ble)
+
 def simd_malloc_test():
     logging.info("Testing TT SIMD Cluster Malloc Machinery!")
     simd0 = tt_simd_cluster(4,8, list(range(4*8)))
@@ -72,6 +96,7 @@ def simd_malloc_test():
     logging.info("Successfully allocated: ", i+1, " tensors")
 
 def main():
+    grayskull_read_write_test()
     duplicate_alloc_test()
     simd_malloc_test()
 

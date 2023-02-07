@@ -16,7 +16,7 @@ class tt_malloc:
         # fill free list tensor with randomized but unique block indices
         # these will be used to generate physical channels and within-channel
         # addresses when reading/writing the hardware
-        self.free_block_index_tensor = torch.randperm(num_blocks, dtype=torch.int64)
+        self.free_block_index_tensor = torch.randperm(num_blocks, dtype=torch.int32)
 
         # multiply randomly permuted integers by block size and add to dram_bot to get actual block base addresses
         self.free_block_index_tensor = self.free_block_index_tensor * int(self.block_size_bytes)
