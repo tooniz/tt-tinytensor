@@ -7,6 +7,10 @@ from tt_simd_cluster import tt_dtype
 from tt_simd_cluster import tt_op_dtype
 from tt_simd_cluster import tt_math_fidelity
 
+class IndentDumper(yaml.Dumper):
+    def increase_indent(self, flow=False, indentless=False):
+        return super(IndentDumper, self).increase_indent(flow, False)
+
 class tt_net_op_types(Enum):
     matmul = 1
     add = 2
@@ -183,12 +187,11 @@ class tt_netlist:
             self.doc['graphs'][name] = op_val_dict
 
     def dump_netlist(self):
-        pass
         #print(self.doc['queues'])
         #file = yaml.dump(self.doc, sort_keys = True, default_flow_style=True, width=1000)
         #print(file)
         with open('res.yaml', 'w') as yaml_file:
-            yaml.dump(self.doc, yaml_file, default_flow_style=True)
+            yaml.dump(self.doc, yaml_file, Dumper=IndentDumper, sort_keys=False, default_flow_style=True)
 
 def main():
     simd0  = tt_simd_cluster(2,2,(0,1,2,3))
