@@ -13,7 +13,7 @@ def alloc_dealloc_test():
     print("Testing TT tensor!")
 
     simd0  = tt_simd_cluster(2,2,(0,1,2,3))
-    num_alloc_blocks = 100000
+    num_alloc_blocks = 10000
     alloc0 = tt_malloc(32, num_alloc_blocks, 0)
 
     loop_cnt = 0
@@ -45,13 +45,13 @@ def alloc_dealloc_test():
             dim_list[-1] = int(dim_list[-1]/block_size)
             dim_list[-2] = int(dim_list[-2]/block_size)
             bla = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list))
-            assert bla.addr_shape == tuple(dim_list), "tt_tensor init from shape tuple, address shape not equal to expected"
+            assert bla.shape == tuple(dim_list), "tt_tensor init from shape tuple, address shape not equal to expected"
         else:
             torch_tens = torch.randn(tuple(dim_list))
             bla = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=torch_tens)
             dim_list[-1] = int(dim_list[-1]/block_size)
             dim_list[-2] = int(dim_list[-2]/block_size)
-            assert bla.addr_shape == tuple(dim_list), "tt_tensor init from torch tensor, address shape not equal to expected"
+            assert bla.shape == tuple(dim_list), "tt_tensor init from torch tensor, address shape not equal to expected"
 
         # delete and de-allocate tt_tensor
         del(bla)
