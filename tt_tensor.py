@@ -53,7 +53,7 @@ class tt_tensor():
 
     def get_dram_chan_tensor_slice(self, slice: int):
         # put everything in channel one for initial test
-        chan_tens = torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
+        chan_tens = int(2)*torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
         return chan_tens
 
     def to_device(self, chip_id: int, torch_in: torch.Tensor):
@@ -84,7 +84,6 @@ class tt_tensor():
         # read back all slices
         for slice in range(iterations):
             read_tensor_flat[0][0][slice] = self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice))
-
         return read_tensor_flat
 
     def split(self):

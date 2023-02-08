@@ -25,7 +25,7 @@ class tt_op_dtype():
         self.dt_acc = dtype_accum
         self.fidelity = fidelity
 
-def block_size_bytes(dtype, block_size, debug=False):
+def block_size_bytes(dtype, block_size, debug=True):
     tile_size_dict = {}
     if debug is False:
         tile_size_dict[tt_dtype.Bfp2_b] = 352

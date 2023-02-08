@@ -4,6 +4,7 @@ import logging
 from tt_simd_cluster import tt_simd_cluster
 from tt_simd_cluster import tt_dtype
 from tt_tensor import tt_tensor
+import IPython
 
 def duplicate_alloc_test():
     logging.info("Testing that multiple calls to set up allocator with same setting results in one allocator being set up!")
@@ -41,14 +42,26 @@ def grayskull_read_write_test():
     be_api.initialize_child_process(target_arch, target_devices)
 
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
-    simd0.set_up_allocators([(tt_dtype.Float32, 128, 1000, 0x21000000)])
+    simd0.set_up_allocators([(tt_dtype.Float32, 128, 10000, 0x20000000)])
+    simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x20000000)])
+    simd0.set_up_allocators([(tt_dtype.Float32, 32, 10000, 0x20000000)])
 
-    tens = torch.randn((1,1,1,1024,1024))
-    tt_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
-    tt_tens.to_device(0,tens)
-    ble = tt_tens.from_device(0)
-    print(torch.allclose(tens,ble))
-    print(ble)
+    for i in range(8):
+        dims = random.choice([1,3,4])
+        block_size = random.choice([32,64,128])
+        tensor_size = random.choice([256,128,512])
+        tens = torch.randn((1,1,dims,tensor_size,tensor_size))
+        tt_tens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
+        tt_tens.to_device(0,tens)
+        ble = tt_tens.from_device(0)
+        diff = torch.isclose(tens,ble)
+        inv = torch.logical_not(diff)
+        indices = inv.nonzero()
+        del(tt_tens)
+        #IPython.embed()
+        assert torch.allclose(tens,ble)
+
+    print("Success")
 
 def simd_malloc_test():
     logging.info("Testing TT SIMD Cluster Malloc Machinery!")
