@@ -201,7 +201,7 @@ class tt_netlist:
         else:
             self.doc['graphs']['graph_op0'] = {}
             self.doc['graphs']['graph_op0']['target_device'] = 0
-            self.doc['graphs']['graph_op0']['input_count'] = 1
+            self.doc['graphs']['graph_op0']['input_count'] = 4
             self.doc['graphs']['graph_op0'][name] = op_val_dict
 
     def dump_netlist(self):
@@ -218,8 +218,8 @@ class tt_netlist:
     - staticvar: {$gptr_q0: 0, $lptr_q0: 0}
     - loop: $p_microbatch_count
     -   execute: {graph_name: graph_op0, queue_settings: {
-        op0_in0: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero},
-        op0_in1: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero}}}
+        queue_0_lin: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero},
+        queue_0_rin: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero}}}
     - endloop
 test-config:
     comparison-config:

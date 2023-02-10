@@ -95,19 +95,17 @@ def grayskull_matmul_test():
     # having it be all ones side steps questions about tiling/ublocks/mblocks/etc
     tens = torch.randn((1,1,1,128,128))
     tt_act_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
-    tt_output_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float16)
-    print(tt_act_tens.address_tensor)
-    print(tt_output_tens.address_tensor)
     tt_act_tens.to_device(0,tens)
-    tt_output_tens.to_device(0,tens)
 
     genout = netlist.binary_tensor_op(tt_net_op_types.matmul, tt_act_tens, tt_act_tens, tt_op_dtype(tt_dtype.Float16))
 
-    out = tt_output_tens.from_device(0)
+    #status = backend.compile_and_run_netlist("loader/tests/net_basic/netlist_eager_mm_ram.yaml", {})
+    status = backend.compile_and_run_netlist("./res.yaml", {})
+    assert status == BackendStatusCode.Success
+
+    out = tt_act_tens.from_device(0)
     assert torch.allclose(out,tens)
 
-    status = backend.compile_and_run_netlist("loader/tests/net_basic/netlist_eager_mm_gen.yaml", {})
-    assert status == BackendStatusCode.Success
     print("before Wait for idle DONE")
 
     backend.wait_for_idle()

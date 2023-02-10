@@ -31,6 +31,13 @@ class tt_tensor():
         # Initialize 'transpose lowest two dimensions' flag to False
         self.transpose_r_c = False
 
+        # Hack to work around the need to initialize each RAM
+        list_shape = list(self.shape)
+        list_shape[-1] = int(list_shape[-1] * block_size)
+        list_shape[-2] = int(list_shape[-2] * block_size)
+        zeros = torch.ones(list_shape)
+        self.to_device(0,zeros)
+
     def __del__(self):
         # once tt_tensor goes out of scope
         # de-allocate space you had reserved via the attached tt allocator
@@ -44,6 +51,8 @@ class tt_tensor():
         addr = torch.bitwise_right_shift(flat_addr_tensor[0,0,tensor_slice], shift)
         list_a = channel.flatten().tolist()
         list_b = addr.flatten().tolist()
+        list_b = flat_addr_tensor[0,0,tensor_slice].flatten().tolist()
+        list_a = [1]
         return list(map(list, zip(list_a, list_b)))
 
     def get_dram_addr_tensor_slice(self, slice: int):
@@ -65,7 +74,7 @@ class tt_tensor():
 
         # write out all slices
         for slice in range(iterations):
-            self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=torch_in_flat[0][0][slice], chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+            self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[0][0][slice]), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
 
     def from_device(self, chip_id):
         # Generate flat view of tensor dims except for chip dims and 2D slices
@@ -83,8 +92,38 @@ class tt_tensor():
         
         # read back all slices
         for slice in range(iterations):
-            read_tensor_flat[0][0][slice] = self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice))
+            read_tensor_flat[0][0][slice] = self.unblock_tensor_slice(self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice)))
         return read_tensor_flat
+
+    def block_tensor_slice(self, tensor, block_dim = 128, ublock_dim = 64, tile_dim = 32, face_dim = 16):
+        blocks_r = int(tensor.shape[-2] / block_dim)
+        blocks_c = int(tensor.shape[-1] / block_dim)
+        ublocks_r = int(block_dim / ublock_dim)
+        ublocks_c = int(block_dim / ublock_dim)
+        tiles_r = int(ublock_dim / tile_dim)
+        tiles_c = int(ublock_dim / tile_dim)
+        faces_r = int(tile_dim / face_dim)
+        faces_c = int(tile_dim / face_dim)
+        blocked_tensor = tensor.reshape(blocks_r,ublocks_r,tiles_r,faces_r,face_dim,blocks_c,ublocks_c,tiles_c,faces_c,face_dim)
+        permuted = blocked_tensor.permute(-10,-5,-9,-4,-8,-3,-7,-2,-6,-1)
+        flattened = permuted.flatten(start_dim=-10,end_dim=-1)
+        back_2d = flattened.reshape(tensor.shape[-2], tensor.shape[-1])
+        return back_2d
+
+    def unblock_tensor_slice(self, tensor, block_dim = 128, ublock_dim = 64, tile_dim = 32, face_dim = 16):
+        blocks_r = int(tensor.shape[-2] / block_dim)
+        blocks_c = int(tensor.shape[-1] / block_dim)
+        ublocks_r = int(block_dim / ublock_dim)
+        ublocks_c = int(block_dim / ublock_dim)
+        tiles_r = int(ublock_dim / tile_dim)
+        tiles_c = int(ublock_dim / tile_dim)
+        faces_r = int(tile_dim / face_dim)
+        faces_c = int(tile_dim / face_dim)
+        blocked_tensor = tensor.reshape(blocks_r,blocks_c,ublocks_r,ublocks_c,tiles_r,tiles_c,faces_r,faces_c,face_dim,face_dim)
+        permuted = blocked_tensor.permute(-10,-8,-6,-4,-2,-9,-7,-5,-3,-1)
+        flattened = permuted.flatten(start_dim=-10,end_dim=-1)
+        back_2d = flattened.reshape(tensor.shape[-2], tensor.shape[-1])
+        return back_2d
 
     def split(self):
         pass
