@@ -1,7 +1,7 @@
 import torch
 from tt_malloc import tt_malloc
 from tt_simd_cluster import tt_simd_cluster
-from tt_simd_cluster import tt_dtype
+from tt_dtype import tt_dtype
 
 class tt_tensor(): 
     def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Bfp8_b):
@@ -53,7 +53,7 @@ class tt_tensor():
 
     def get_dram_chan_tensor_slice(self, slice: int):
         # put everything in channel one for initial test
-        chan_tens = int(2)*torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
+        chan_tens = torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
         return chan_tens
 
     def to_device(self, chip_id: int, torch_in: torch.Tensor):

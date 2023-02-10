@@ -2,10 +2,9 @@ import yaml
 from enum import Enum
 
 from tt_tensor import tt_tensor
-from tt_simd_cluster import tt_simd_cluster
-from tt_simd_cluster import tt_dtype
-from tt_simd_cluster import tt_op_dtype
-from tt_simd_cluster import tt_math_fidelity
+from tt_dtype import tt_dtype
+from tt_dtype import tt_op_dtype
+from tt_dtype import tt_math_fidelity
 
 class IndentDumper(yaml.Dumper):
     def increase_indent(self, flow=False, indentless=False):
@@ -84,9 +83,9 @@ class tt_netlist:
             # go through the current r_c slice and define queue
             rdim = l_input.address_tensor.shape[-2]
             cdim = l_input.address_tensor.shape[-1]
-            self.add_op(name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
-            self.add_op(name = slice_queue_name+'_rin', type = tt_net_op_types.ram, block_size = r_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(r_input.dtype), dram= r_input.get_dram_list(slice))
-            self.add_op(name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice))
+            self.add_op(lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
+            self.add_op(lin_tensor=l_input, name = slice_queue_name+'_rin', type = tt_net_op_types.ram, block_size = r_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(r_input.dtype), dram= r_input.get_dram_list(slice))
+            self.add_op(lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice))
 
         # make graphs and ops for current tensor slices
         for slice in range(iterations):
@@ -96,9 +95,9 @@ class tt_netlist:
             rdim = output.address_tensor.shape[-2]
             cdim = output.address_tensor.shape[-1]
 
-            self.add_op(name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype)
+            self.add_op(lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype)
 
-    def add_op(self, name: str, type: tt_net_op_types, \
+    def add_op(self, lin_tensor: tt_tensor, name: str, type: tt_net_op_types, \
             block_size: int, \
             grid_size: list, \
             inputs: list, # use inputs[0] as queue/ram input
@@ -111,7 +110,6 @@ class tt_netlist:
             loc: str = 'dram',
             dram: list = [],
             \
-            m_k: int = None, u_kt: int = None, \
             bias: str = None,
             relu_en: str = None, relu_mode: str = None, relu_threshold: float = None, \
             approximate_mode: str = None,
@@ -121,20 +119,36 @@ class tt_netlist:
         op_val_dict = {}
         attributes_dict = {}
 
-        # figure out mblock sizes
         grid_loc = [0,0]
         ublock_order = 'r' # r or c
+
+        #
+        # figure out mbloc/ublock sizes
+        # and m_k & u_kt
+        #
         block_size_tiles = int(block_size / 32)
-        ublock = [0,0]
-        mblock = [block_size_tiles, block_size_tiles]
+        if(block_size > 256):
+            ublock_size_tiles = int(block_size_tiles / 4)
+        elif(block_size == 128):
+            ublock_size_tiles = int(block_size_tiles / 2)
+        elif(block_size < 128):
+            ublock_size_tiles = block_size_tiles
+        ublock = [ublock_size_tiles,ublock_size_tiles]
+        mblock = [int(block_size_tiles/ublock_size_tiles), int(block_size_tiles/ublock_size_tiles)]
+        inner_dim_tiles = int((lin_tensor.address_tensor.shape[-1] * lin_tensor.block_size) / 32)
+        u_kt = 2
+        m_k = int(inner_dim_tiles / u_kt)
 
         # fill in required op/queue/ram descriptor fields
         op_val_dict['type'] = type.name
-        op_val_dict['grid_loc'] = grid_loc
+        if(type is not tt_net_op_types.queue and type is not tt_net_op_types.ram):
+            op_val_dict['grid_loc'] = grid_loc
         op_val_dict['grid_size'] = grid_size
         op_val_dict['mblock'] = mblock
         op_val_dict['ublock'] = ublock
-        op_val_dict['ublock_order'] = ublock_order
+        if(type is not tt_net_op_types.queue and type is not tt_net_op_types.ram):
+            op_val_dict['ublock_order'] = ublock_order
+            op_val_dict['buf_size_mb'] = 2
         op_val_dict['t'] = 1
 
         out_df = op_dtype.dt.name
@@ -156,6 +170,7 @@ class tt_netlist:
             op_val_dict['intermed_df'] = intermed_df
             op_val_dict['acc_df'] = acc_df
             op_val_dict['math_fidelity'] = math_fidelity
+            op_val_dict['untilize_output'] = False
 
         if(type == tt_net_op_types.matmul):
             attributes = True
@@ -184,43 +199,41 @@ class tt_netlist:
         if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             self.doc['queues'][name] = op_val_dict
         else:
-            self.doc['graphs'][name] = op_val_dict
+            self.doc['graphs']['graph_op0'] = {}
+            self.doc['graphs']['graph_op0']['target_device'] = 0
+            self.doc['graphs']['graph_op0']['input_count'] = 1
+            self.doc['graphs']['graph_op0'][name] = op_val_dict
 
     def dump_netlist(self):
-        #print(self.doc['queues'])
-        #file = yaml.dump(self.doc, sort_keys = True, default_flow_style=True, width=1000)
-        #print(file)
+        self.doc['devices'] = {}
+        self.doc['devices']['arch'] = 'grayskull'
         with open('res.yaml', 'w') as yaml_file:
-            yaml.dump(self.doc, yaml_file, Dumper=IndentDumper, sort_keys=False, default_flow_style=True)
+            yaml.dump(self.doc, yaml_file, Dumper=IndentDumper, sort_keys=False, default_flow_style=False)
+            yaml_file.close()
+    
+        end_string = """programs:
+- op_matmul:
+    - var: {$p_microbatch_count: 1}
+    - var: {$c_microbatch_size: 1, $c_one: 1, $c_zero: 0}
+    - staticvar: {$gptr_q0: 0, $lptr_q0: 0}
+    - loop: $p_microbatch_count
+    -   execute: {graph_name: graph_op0, queue_settings: {
+        op0_in0: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero},
+        op0_in1: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero}}}
+    - endloop
+test-config:
+    comparison-config:
+        type: AllCloseHw
+        atol: 0.01
+        rtol: 0.15
+        check_pct: 0.75
+        check_pcc: 0.97
+        verbosity: Concise
+    stimulus-config:
+        type: Normal
+        normal_mean: 0.0
+        normal_stddev: 0.25"""
+        file_object = open('res.yaml', 'a')
+        file_object.write(end_string)
+        file_object.close()
 
-def main():
-    simd0  = tt_simd_cluster(2,2,(0,1,2,3))
-    num_alloc_blocks = 100000
-    simd0.set_up_allocators([(tt_dtype.Bfp8_b,64,num_alloc_blocks,0)])
-    simd0.set_up_allocators([(tt_dtype.Bfp8_b,128,num_alloc_blocks,0)])
-
-    netlist0 = tt_netlist()
-
-    block_size = 128
-    dim_list0 = (1,2,3,8,8)
-    dim_list1 = (1,2,3,4,4)
-    dim_list2 = (1,2,3,2,2)
-
-    bla0 = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list0))
-    bla1 = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list1))
-    bla2 = tt_tensor(block_size=block_size, simd_cluster=simd0, shape=tuple(dim_list2))
-
-    out_tensor = netlist0.binary_tensor_op(tt_net_op_types.matmul, bla0, bla1, tt_op_dtype(tt_dtype.Bfp8_b))
-    netlist0.dump_netlist()
-
-    del(bla0)
-    del(bla1)
-    del(bla2)
-    del(out_tensor)
-
-if __name__ == "__main__":
-    print("Testing TT netlist api")
-
-    main()
-
-    #main()

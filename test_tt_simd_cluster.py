@@ -2,7 +2,7 @@ import torch
 import random
 import logging
 from tt_simd_cluster import tt_simd_cluster
-from tt_simd_cluster import tt_dtype
+from tt_simd_cluster import tt_dtype, tt_op_dtype
 from tt_tensor import tt_tensor
 import IPython
 
@@ -61,6 +61,59 @@ def grayskull_read_write_test():
         #IPython.embed()
         assert torch.allclose(tens,ble)
 
+    simd0.be_api.finish_child_process()
+    #backend.destroy()
+    print("Success")
+
+def grayskull_matmul_test():
+    import time
+    import torch
+    from tt_netlist import tt_netlist
+    from tt_netlist import tt_net_op_types
+    import eager_backend.backend_api as be_api
+    from test_utils import py_desc, py_tensor
+    from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
+    from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
+
+    target_arch = BackendDevice.Grayskull
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices)
+
+    simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
+    netlist = tt_netlist()
+
+    # set up allocators with a free list of 1 block, so as to ensure the addresses of
+    # allocated blocks are equal to the dram_bottom address provided
+    # this is needed since the netlist this test is running is hand coded with 
+    # fixed input and output addresses
+    simd0.set_up_allocators([(tt_dtype.Float32, 128, 1, 0x21000000)])
+    simd0.set_up_allocators([(tt_dtype.Float16, 128, 2, 0x31000000)])
+
+    # make a one block tensor of ones
+    # having it be all ones side steps questions about tiling/ublocks/mblocks/etc
+    tens = torch.randn((1,1,1,128,128))
+    tt_act_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
+    tt_output_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float16)
+    print(tt_act_tens.address_tensor)
+    print(tt_output_tens.address_tensor)
+    tt_act_tens.to_device(0,tens)
+    tt_output_tens.to_device(0,tens)
+
+    genout = netlist.binary_tensor_op(tt_net_op_types.matmul, tt_act_tens, tt_act_tens, tt_op_dtype(tt_dtype.Float16))
+
+    out = tt_output_tens.from_device(0)
+    assert torch.allclose(out,tens)
+
+    status = backend.compile_and_run_netlist("loader/tests/net_basic/netlist_eager_mm_gen.yaml", {})
+    assert status == BackendStatusCode.Success
+    print("before Wait for idle DONE")
+
+    backend.wait_for_idle()
+    print("Wait for idle DONE")
+    simd0.be_api.finish_child_process()
+    backend.destroy()
     print("Success")
 
 def simd_malloc_test():
@@ -109,9 +162,10 @@ def simd_malloc_test():
     logging.info("Successfully allocated: ", i+1, " tensors")
 
 def main():
-    grayskull_read_write_test()
-    duplicate_alloc_test()
-    simd_malloc_test()
+    grayskull_matmul_test()
+    #grayskull_read_write_test()
+    #duplicate_alloc_test()
+    #simd_malloc_test()
 
 if __name__ == "__main__":
     main()

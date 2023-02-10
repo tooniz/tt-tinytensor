@@ -1,48 +1,16 @@
 import logging
 from tt_malloc import tt_malloc
+#from tt_netlist import tt_netlist
+from tt_dtype import tt_dtype
+from tt_dtype import tt_op_dtype
+from tt_dtype import tt_math_fidelity
+from tt_dtype import block_size_bytes
+
 from enum import Enum
 import eager_backend.backend_api as be_api
 from test_utils import py_desc, py_tensor
 from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
 from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
-
-class tt_dtype(Enum):
-    Bfp2_b = 1
-    Bfp4_b = 2
-    Bfp8_b = 3
-    Float16_a = 4
-    Float16_b = 5
-    Float32 = 6
-
-class tt_math_fidelity(Enum):
-    LoFi = 1
-    HiFi = 2
-
-class tt_op_dtype():
-    def __init__(self, dtype, dype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b, fidelity: tt_math_fidelity = tt_math_fidelity.HiFi):
-        self.dt = dtype
-        self.dt_int = dype_intermed
-        self.dt_acc = dtype_accum
-        self.fidelity = fidelity
-
-def block_size_bytes(dtype, block_size, debug=True):
-    tile_size_dict = {}
-    if debug is False:
-        tile_size_dict[tt_dtype.Bfp2_b] = 352
-        tile_size_dict[tt_dtype.Bfp4_b] = 608
-        tile_size_dict[tt_dtype.Bfp8_b] = 1120
-        tile_size_dict[tt_dtype.Float16_a] = 2080
-        tile_size_dict[tt_dtype.Float16_b] = 2080
-        tile_size_dict[tt_dtype.Float32] = 4128
-    else:
-        tile_size_dict[tt_dtype.Bfp2_b] = 352 * 2
-        tile_size_dict[tt_dtype.Bfp4_b] = 608 * 2
-        tile_size_dict[tt_dtype.Bfp8_b] = 1120 * 2
-        tile_size_dict[tt_dtype.Float16_a] = 2080 * 2
-        tile_size_dict[tt_dtype.Float16_b] = 2080 * 2
-        tile_size_dict[tt_dtype.Float32] = 4128 * 2
-
-    return int((block_size/32)*(block_size/32)*tile_size_dict[dtype])
 
 class tt_dram_accessor():
     def __init__(self, be_api):
@@ -74,6 +42,8 @@ class tt_simd_cluster():
         self.c = c
         self.ids = ids
         self.allocators = {}
+        self.be_api = be_api
+        #self.netlist_api = tt_netlist
         if(be_api is not None):
             self.dram_accessor = tt_dram_accessor(be_api)
 

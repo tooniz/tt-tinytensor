@@ -26,7 +26,7 @@ class tt_malloc:
         addr_tensor_shape = addr_tensor.shape
         tensor_length = list(addr_tensor.flatten(start_dim=2,end_dim=-1).shape)[-1]
 
-        assert list(self.free_block_index_tensor.shape)[0] > tensor_length, "Error: asking for more blocks than left in free list"
+        assert list(self.free_block_index_tensor.shape)[0] >= tensor_length, "Error: asking for more blocks than left in free list"
 
         # get the first 'tensor_length' elements of free list
         blocks = self.free_block_index_tensor[:tensor_length]
