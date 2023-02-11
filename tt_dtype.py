@@ -18,12 +18,12 @@ def block_size_bytes(dtype, block_size, debug=True):
         tile_size_dict[tt_dtype.Float16_b] = 2080
         tile_size_dict[tt_dtype.Float32] = 4128
     else:
-        tile_size_dict[tt_dtype.Bfp2_b] = 352 * 2
-        tile_size_dict[tt_dtype.Bfp4_b] = 608 * 2
-        tile_size_dict[tt_dtype.Bfp8_b] = 1120 * 2
-        tile_size_dict[tt_dtype.Float16] = 2080 * 2
-        tile_size_dict[tt_dtype.Float16_b] = 2080 * 2
-        tile_size_dict[tt_dtype.Float32] = 4128 * 2
+        tile_size_dict[tt_dtype.Bfp2_b] = 352 * 3
+        tile_size_dict[tt_dtype.Bfp4_b] = 608 * 3
+        tile_size_dict[tt_dtype.Bfp8_b] = 1120 * 3
+        tile_size_dict[tt_dtype.Float16] = 2080 * 3
+        tile_size_dict[tt_dtype.Float16_b] = 2080 * 3
+        tile_size_dict[tt_dtype.Float32] = 4128 * 3
 
     return int((block_size/32)*(block_size/32)*tile_size_dict[dtype])
 

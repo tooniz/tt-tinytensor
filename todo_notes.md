@@ -6,6 +6,7 @@ Figure out how to hash from dram base addresses to 6 dram channels. Current impl
 Consider whether the base address adding and multiply by block size should be done in tensor.get_list() as opposed to tt_malloc
 
 # Tensor functionality
+Sort out ownership of the address mapping, who and when calls deallocate, in the presence of multiple TT views of the same data
 
 # Netlist API functionality
 
@@ -24,6 +25,5 @@ Add further checking to SIMD allocator and malloc test
 - Ensure using RAMs is as performant for reads/writes/reblocking as with queues
 - Ability to loop program on local devices without hacks
 - Ability to string epoch outputs->inputs via sram
-
 
 

@@ -4,7 +4,15 @@ import logging
 from tt_simd_cluster import tt_simd_cluster
 from tt_simd_cluster import tt_dtype, tt_op_dtype
 from tt_tensor import tt_tensor
-import IPython
+import time
+import torch
+from tt_netlist import tt_netlist
+from tt_netlist import tt_net_op_types
+import eager_backend.backend_api as be_api
+from test_utils import py_desc, py_tensor
+from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
+from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
+from IPython import embed
 
 def duplicate_alloc_test():
     logging.info("Testing that multiple calls to set up allocator with same setting results in one allocator being set up!")
@@ -66,15 +74,6 @@ def grayskull_read_write_test():
     print("Success")
 
 def grayskull_matmul_test():
-    import time
-    import torch
-    from tt_netlist import tt_netlist
-    from tt_netlist import tt_net_op_types
-    import eager_backend.backend_api as be_api
-    from test_utils import py_desc, py_tensor
-    from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
-    from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
-
     target_arch = BackendDevice.Grayskull
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
@@ -84,35 +83,44 @@ def grayskull_matmul_test():
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
     netlist = tt_netlist()
 
-    # set up allocators with a free list of 1 block, so as to ensure the addresses of
-    # allocated blocks are equal to the dram_bottom address provided
-    # this is needed since the netlist this test is running is hand coded with 
-    # fixed input and output addresses
-    simd0.set_up_allocators([(tt_dtype.Float32, 128, 1, 0x21000000)])
-    simd0.set_up_allocators([(tt_dtype.Float16, 128, 2, 0x31000000)])
+    # Run some matmuls
+    random_slice_matmuls(10,simd0,netlist,backend)
 
-    # make a one block tensor of ones
-    # having it be all ones side steps questions about tiling/ublocks/mblocks/etc
-    tens = torch.randn((1,1,1,128,128))
-    tt_act_tens = tt_tensor(block_size=128, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
-    tt_act_tens.to_device(0,tens)
-
-    genout = netlist.binary_tensor_op(tt_net_op_types.matmul, tt_act_tens, tt_act_tens, tt_op_dtype(tt_dtype.Float16))
-
-    #status = backend.compile_and_run_netlist("loader/tests/net_basic/netlist_eager_mm_ram.yaml", {})
-    status = backend.compile_and_run_netlist("./res.yaml", {})
-    assert status == BackendStatusCode.Success
-
-    out = tt_act_tens.from_device(0)
-    assert torch.allclose(out,tens)
-
-    print("before Wait for idle DONE")
-
-    backend.wait_for_idle()
-    print("Wait for idle DONE")
+    check_allocator_end_state(simd0)
     simd0.be_api.finish_child_process()
     backend.destroy()
+
     print("Success")
+
+def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist, backend):
+    for i in range(count):
+        block_size_max_mul = random.choice([(64,10),(128,5),(256,2)] # block size 512 overflows SRAM ,(512,1)])
+        block_size = block_size_max_mul[0]
+        block_mul  = random.randint(1,block_size_max_mul[1])
+
+        simd0.set_up_allocators([(tt_dtype.Float32, block_size, block_mul*block_mul*2, 0x21000000)])
+        simd0.set_up_allocators([(tt_dtype.Float16, block_size, block_mul*block_mul, 0x31000000)])
+
+        lin = torch.ones((1,1,1,block_size*block_mul,block_size*block_mul))
+        rin = torch.randn((1,1,1,block_size*block_mul,block_size*block_mul))
+        lin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=lin, dtype=tt_dtype.Float32)
+        rin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=rin, dtype=tt_dtype.Float32)
+        lin_ttens.to_device(0,lin)
+        rin_ttens.to_device(0,rin)
+
+        #genout = netlist.unary_tensor_op(tt_net_op_types.nop, lin_ttens, tt_op_dtype(tt_dtype.Float16))
+        genout = netlist.binary_tensor_op(tt_net_op_types.matmul, lin_ttens, rin_ttens, tt_op_dtype(tt_dtype.Float16))
+        status = backend.compile_and_run_netlist(netlist.get_last_netlist_name(), {})
+        #assert status == BackendStatusCode.Success
+        backend.wait_for_idle()
+
+        out = genout.from_device(0)
+        out = out.type(torch.float32)
+        assert torch.allclose(out,torch.matmul(lin,rin),atol=0.5,rtol=0.5)
+
+        del(lin_ttens)
+        del(rin_ttens)
+        del(genout)
 
 def simd_malloc_test():
     logging.info("Testing TT SIMD Cluster Malloc Machinery!")
@@ -150,6 +158,11 @@ def simd_malloc_test():
         del tns0
 
     # Go through allocators and check that everything was de-allocated properly
+    check_allocator_end_state(simd0)
+    logging.info("Successfully allocated: ", i+1, " tensors")
+
+def check_allocator_end_state(simd0: tt_simd_cluster):
+    # Go through allocators and check that everything was de-allocated properly
     for allocator in simd0.allocators.values():
         # check the free list is back to being fully free
         assert list(allocator.free_block_index_tensor.shape)[0] == allocator.num_blocks, "Error: deallocator did not put back all blocks"
@@ -157,7 +170,6 @@ def simd_malloc_test():
         # check the blocks in the free list are unique
         unique = torch.unique(allocator.free_block_index_tensor)
         assert unique.shape == allocator.free_block_index_tensor.shape, "Error: the free list got poluted, with duplicate blocks"
-    logging.info("Successfully allocated: ", i+1, " tensors")
 
 def main():
     grayskull_matmul_test()

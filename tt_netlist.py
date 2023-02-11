@@ -17,6 +17,7 @@ class tt_net_op_types(Enum):
     multiply = 4
     queue = 5
     ram = 6
+    nop = 10
 
 class tt_netlist:
     def __init__(self):
@@ -27,6 +28,9 @@ class tt_netlist:
         self.queue_counter = 0
         self.op_counter = 0
         self.graph_counter = 0
+
+        self.last_netlist_filename = None
+        self.next_netlist_idx = 0
 
     def start_netlist(self):
         pass
@@ -47,6 +51,43 @@ class tt_netlist:
             cdim = list(tensor.address_tensor.shape[-1])[0]
             self.add_op(name = rqname, type = 'ram', block_size = tensor.block_size, grid_size = [rdim,cdim], inputs = [input], out_df = tensor.dtype, dram= tensor.get_dram_list(current_slice))
             self.queue_counter = self.queue_counter + 1
+
+    def unary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype):
+        # make output tensor
+        out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape, dtype=op_dtype.dt)
+        self.unary_slice_op(op, l_input, out_tens, op_dtype)
+        self.dump_netlist()
+        return out_tens
+
+    def unary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
+        # flatten out the dimensions that will be iterated through for computation
+        l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
+        output_flat = output.address_tensor.flatten(start_dim=2,end_dim=-3)
+
+        iterations = l_input_flat.shape[2]
+
+        op_name = op.name
+        queue_name = 'queue'
+        for slice in range(iterations):
+            # make rams/queues for current tensor slices
+            slice_queue_name = queue_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+            slice_op_name = op_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+
+            # go through the current r_c slice and define queue
+            rdim = l_input.address_tensor.shape[-2]
+            cdim = l_input.address_tensor.shape[-1]
+            self.add_op(lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
+            self.add_op(lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice))
+
+        # make graphs and ops for current tensor slices
+        for slice in range(iterations):
+            # make rams/queues for current tensor slices
+            slice_queue_name = queue_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+            slice_op_name = op_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+            rdim = output.address_tensor.shape[-2]
+            cdim = output.address_tensor.shape[-1]
+
+            self.add_op(lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin'], in_df = [l_input.dtype], op_dtype = op_dtype)
 
     def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype):
         # make output tensor
@@ -77,8 +118,8 @@ class tt_netlist:
         queue_name = 'queue'
         for slice in range(iterations):
             # make rams/queues for current tensor slices
-            slice_queue_name = queue_name + "_" + str(slice)
-            slice_op_name = op_name + "_" + str(slice)
+            slice_queue_name = queue_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+            slice_op_name = op_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
 
             # go through the current r_c slice and define queue
             rdim = l_input.address_tensor.shape[-2]
@@ -90,8 +131,8 @@ class tt_netlist:
         # make graphs and ops for current tensor slices
         for slice in range(iterations):
             # make rams/queues for current tensor slices
-            slice_queue_name = queue_name + "_" + str(slice)
-            slice_op_name = op_name + "_" + str(slice)
+            slice_queue_name = queue_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+            slice_op_name = op_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
             rdim = output.address_tensor.shape[-2]
             cdim = output.address_tensor.shape[-1]
 
@@ -127,12 +168,13 @@ class tt_netlist:
         # and m_k & u_kt
         #
         block_size_tiles = int(block_size / 32)
-        if(block_size > 256):
-            ublock_size_tiles = int(block_size_tiles / 4)
-        elif(block_size == 128):
-            ublock_size_tiles = int(block_size_tiles / 2)
-        elif(block_size < 128):
-            ublock_size_tiles = block_size_tiles
+        ublock_size_tiles = 2
+        # if(block_size > 256):
+        #     ublock_size_tiles = int(block_size_tiles / 4)
+        # elif(block_size == 128):
+        #     ublock_size_tiles = int(block_size_tiles / 2)
+        # elif(block_size < 128):
+        #     ublock_size_tiles = block_size_tiles
         ublock = [ublock_size_tiles,ublock_size_tiles]
         mblock = [int(block_size_tiles/ublock_size_tiles), int(block_size_tiles/ublock_size_tiles)]
         inner_dim_tiles = int((lin_tensor.address_tensor.shape[-1] * lin_tensor.block_size) / 32)
@@ -199,41 +241,48 @@ class tt_netlist:
         if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             self.doc['queues'][name] = op_val_dict
         else:
-            self.doc['graphs']['graph_op0'] = {}
-            self.doc['graphs']['graph_op0']['target_device'] = 0
-            self.doc['graphs']['graph_op0']['input_count'] = 4
-            self.doc['graphs']['graph_op0'][name] = op_val_dict
+            self.graph_op_name = 'graph_op_0_' + str(self.next_netlist_idx)
+            self.doc['graphs'][self.graph_op_name] = {}
+            self.doc['graphs'][self.graph_op_name]['target_device'] = 0
+            self.doc['graphs'][self.graph_op_name]['input_count'] = 1
+            self.doc['graphs'][self.graph_op_name][name] = op_val_dict
+
+    def get_last_netlist_name(self):
+        assert self.last_netlist_filename != None
+        return self.last_netlist_filename
 
     def dump_netlist(self):
+        self.last_netlist_filename = 'netlist_' + str(self.next_netlist_idx) + '.yaml'
         self.doc['devices'] = {}
         self.doc['devices']['arch'] = 'grayskull'
-        with open('res.yaml', 'w') as yaml_file:
+        with open(self.last_netlist_filename, 'w') as yaml_file:
             yaml.dump(self.doc, yaml_file, Dumper=IndentDumper, sort_keys=False, default_flow_style=False)
             yaml_file.close()
     
-        end_string = """programs:
-- op_matmul:
-    - var: {$p_microbatch_count: 1}
-    - var: {$c_microbatch_size: 1, $c_one: 1, $c_zero: 0}
-    - staticvar: {$gptr_q0: 0, $lptr_q0: 0}
-    - loop: $p_microbatch_count
-    -   execute: {graph_name: graph_op0, queue_settings: {
-        queue_0_lin: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero},
-        queue_0_rin: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero}}}
-    - endloop
-test-config:
-    comparison-config:
-        type: AllCloseHw
-        atol: 0.01
-        rtol: 0.15
-        check_pct: 0.75
-        check_pcc: 0.97
-        verbosity: Concise
-    stimulus-config:
-        type: Normal
-        normal_mean: 0.0
-        normal_stddev: 0.25"""
-        file_object = open('res.yaml', 'a')
-        file_object.write(end_string)
-        file_object.close()
+        program_string = "programs:\n"
+        program_name_string = "  - op_" + str(self.next_netlist_idx) + ":\n"
+        var_string = "    - var: {$c_zero: 0}\n"
+        graph_op = self.graph_op_name
+        exec_string = "    - execute: {graph_name: " + graph_op + ", queue_settings: {"
+        queue_name = 'queue_0_' + str(self.next_netlist_idx)
+        q0_string = queue_name + "_lin: {prologue: false, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero}}}" #,"
+        q1_string = queue_name + "_rin: {prologue: true, epilogue: false, zero: false, rd_ptr_global: $c_zero, wr_ptr_global: $c_zero}}}"
 
+        #end_string = "\n    - endloop"
+        file_object = open(self.last_netlist_filename, 'a')
+        file_object.write(program_string)
+        file_object.write(program_name_string)
+        file_object.write(var_string)
+        file_object.write(exec_string)
+        file_object.write(q0_string)
+        #file_object.write(q1_string)
+        file_object.close()
+        self.next_netlist_idx = self.next_netlist_idx + 1
+
+        self.doc = {}
+        self.doc['queues'] = {}
+        self.doc['devices'] = {}
+        self.doc['graphs'] = {}
+        self.queue_counter = 0
+        self.op_counter = 0
+        self.graph_counter = 0

@@ -5,7 +5,7 @@ from tt_dtype import tt_dtype
 from tt_dtype import tt_op_dtype
 from tt_dtype import tt_math_fidelity
 from tt_dtype import block_size_bytes
-
+import torch
 from enum import Enum
 import eager_backend.backend_api as be_api
 from test_utils import py_desc, py_tensor
@@ -22,15 +22,17 @@ class tt_dram_accessor():
             'addr': addr,
             'loc': IOLocation.Dram
         }
-        self.be_api.init_queue(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), 1)
+        self.be_api.init_queue(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), 2)
         self.be_api.push_tensor(IOLocation.Dram, chip_id, py_desc(weight['chan']), py_desc(weight['addr']), py_desc(weight['data']), IOType.RandomAccess, 0)
-    def read_tensor_slice(self,chip_id,data,chan,addr):
+
+    def read_tensor_slice(self,chip_id,data,chan,addr,torch_dtype):
         weight = {
             'data': data,
             'chan': chan,
             'addr': addr,
             'loc': IOLocation.Dram
         }
+        assert weight['data'].dtype == torch_dtype
         weight_desc = py_desc(weight['data'])
         self.be_api.get_tensor(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), weight_desc, IOType.RandomAccess, 0, False)
         out = py_tensor(weight_desc)
@@ -59,8 +61,8 @@ class tt_simd_cluster():
     def write_tensor_slice_to_dram(self, chip_id, data, chan, address):
         self.dram_accessor.write_tensor_slice(chip_id=chip_id, data=data, chan=chan, addr=address)
 
-    def read_tensor_slice_from_dram(self, chip_id, data_shape, chan, address):
-        return self.dram_accessor.read_tensor_slice(chip_id, data_shape, chan, address)
+    def read_tensor_slice_from_dram(self, chip_id, data_shape, chan, address, torch_dtype):
+        return self.dram_accessor.read_tensor_slice(chip_id, data_shape, chan, address, torch_dtype)
 
     def set_up_allocators(self, alloc_list: list): # list of 4 entry tuples (dtype, block size, number of blocks, base_address)
         for alloc_data in alloc_list:
