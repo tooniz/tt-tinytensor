@@ -1,3 +1,7 @@
+#####
+##### Sort out requeting one o two slots in Tonys code and sizing of blocks in
+
+
 # High level philosophy
 How to capture pipeline behaviors clean
 

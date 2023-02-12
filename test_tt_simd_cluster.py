@@ -94,15 +94,16 @@ def grayskull_matmul_test():
 
 def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist, backend):
     for i in range(count):
-        block_size_max_mul = random.choice([(64,10),(128,5),(256,2)] # block size 512 overflows SRAM ,(512,1)])
+        block_size_max_mul = random.choice([(64,10),(128,5),(256,2)]) # block size 512 overflows SRAM ,(512,1)])
         block_size = block_size_max_mul[0]
         block_mul  = random.randint(1,block_size_max_mul[1])
+        number_of_inputs = 2
+        number_of_dims = 3
+        simd0.set_up_allocators([(tt_dtype.Float32, block_size, block_mul*block_mul*number_of_inputs*number_of_dims, 0x21000000)])
+        simd0.set_up_allocators([(tt_dtype.Float16, block_size, block_mul*block_mul*number_of_dims, 0x31000000)])
 
-        simd0.set_up_allocators([(tt_dtype.Float32, block_size, block_mul*block_mul*2, 0x21000000)])
-        simd0.set_up_allocators([(tt_dtype.Float16, block_size, block_mul*block_mul, 0x31000000)])
-
-        lin = torch.ones((1,1,1,block_size*block_mul,block_size*block_mul))
-        rin = torch.randn((1,1,1,block_size*block_mul,block_size*block_mul))
+        lin = torch.randn((1,1,number_of_dims,block_size*block_mul,block_size*block_mul))
+        rin = torch.randn((1,1,number_of_dims,block_size*block_mul,block_size*block_mul))
         lin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=lin, dtype=tt_dtype.Float32)
         rin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=rin, dtype=tt_dtype.Float32)
         lin_ttens.to_device(0,lin)
@@ -111,13 +112,15 @@ def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist
         #genout = netlist.unary_tensor_op(tt_net_op_types.nop, lin_ttens, tt_op_dtype(tt_dtype.Float16))
         genout = netlist.binary_tensor_op(tt_net_op_types.matmul, lin_ttens, rin_ttens, tt_op_dtype(tt_dtype.Float16))
         status = backend.compile_and_run_netlist(netlist.get_last_netlist_name(), {})
-        #assert status == BackendStatusCode.Success
+        assert status == BackendStatusCode.Success
         backend.wait_for_idle()
 
         out = genout.from_device(0)
         out = out.type(torch.float32)
-        assert torch.allclose(out,torch.matmul(lin,rin),atol=0.5,rtol=0.5)
-
+        golden_out = torch.matmul(lin,rin)
+        assert torch.allclose(out,golden_out,atol=0.5,rtol=0.5)
+        embed()
+        #assert torch.allclose(out,lin,atol=0.5,rtol=0.5)
         del(lin_ttens)
         del(rin_ttens)
         del(genout)

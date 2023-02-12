@@ -22,7 +22,7 @@ class tt_dram_accessor():
             'addr': addr,
             'loc': IOLocation.Dram
         }
-        self.be_api.init_queue(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), 2)
+        self.be_api.init_queue(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), 1)
         self.be_api.push_tensor(IOLocation.Dram, chip_id, py_desc(weight['chan']), py_desc(weight['addr']), py_desc(weight['data']), IOType.RandomAccess, 0)
 
     def read_tensor_slice(self,chip_id,data,chan,addr,torch_dtype):
