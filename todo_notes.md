@@ -1,7 +1,7 @@
 #####
 ##### Sort out requeting one o two slots in Tonys code and sizing of blocks in
 
-
+# 
 # High level philosophy
 How to capture pipeline behaviors clean
 
@@ -23,6 +23,7 @@ Add further checking to SIMD allocator and malloc test
 
 
 # Low level functionality that is needed
+- Graphs with multiple target devices for netlist brevity
 - Light weight queue command that will leave everything the same but change dram queue addresses to read/write
 - Sync primitives so that working with RAMs can be done safely
 - Matmul and max reduce that can keep accumulating across 'light epochs', to reduce across slice dimensions

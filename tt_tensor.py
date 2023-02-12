@@ -47,6 +47,8 @@ class tt_tensor():
             self.torch_dtype = torch.float16
         elif(dtype == tt_dtype.Float16_b):
             self.torch_dtype = torch.bfloat16
+        else:
+            self.torch_dtype = None
         zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
         self.to_device(0,zeros) 
 
@@ -80,6 +82,8 @@ class tt_tensor():
         return chan_tens
 
     def to_device(self, chip_id: int, torch_in: torch.Tensor):
+        assert self.torch_dtype is not None
+
         # convert input tensor to expected input data type
         torch_in_dt = torch_in.type(self.torch_dtype)
 
@@ -92,6 +96,8 @@ class tt_tensor():
             self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[0][0][slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
 
     def from_device(self, chip_id):
+        assert self.torch_dtype is not None
+
         # Generate flat view of tensor dims except for chip dims and 2D slices
         addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3)
         iterations = addr_tensor_flat.shape[2]

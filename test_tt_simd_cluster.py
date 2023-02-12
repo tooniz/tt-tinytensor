@@ -69,9 +69,10 @@ def grayskull_read_write_test():
         #IPython.embed()
         assert torch.allclose(tens,ble)
 
+    check_allocator_end_state(simd0)
     simd0.be_api.finish_child_process()
-    #backend.destroy()
-    print("Success")
+    backend.destroy()
+    logging.info("Passed grayskull tensor read/write test")
 
 def grayskull_matmul_test():
     target_arch = BackendDevice.Grayskull
@@ -90,7 +91,7 @@ def grayskull_matmul_test():
     simd0.be_api.finish_child_process()
     backend.destroy()
 
-    print("Success")
+    logging.info("Passed grayskull matmul test")
 
 def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist, backend):
     for i in range(count):
@@ -119,8 +120,8 @@ def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist
         out = out.type(torch.float32)
         golden_out = torch.matmul(lin,rin)
         assert torch.allclose(out,golden_out,atol=0.5,rtol=0.5)
-        embed()
         #assert torch.allclose(out,lin,atol=0.5,rtol=0.5)
+
         del(lin_ttens)
         del(rin_ttens)
         del(genout)
