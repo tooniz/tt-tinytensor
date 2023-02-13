@@ -1,16 +1,21 @@
 #####
-##### Sort out requeting one o two slots in Tonys code and sizing of blocks in
+##### List of hacks
+#####
+- Sort out needing to allocate twice the calculated buffer size
 
 # 
 # High level philosophy
 How to capture pipeline behaviors clean
 
 # Allocator functionality:
-Figure out how to hash from dram base addresses to 6 dram channels. Current implementation has only powers of two.
-Consider whether the base address adding and multiply by block size should be done in tensor.get_list() as opposed to tt_malloc
+- Hashing to six / 8 channels and hashed address generation for multi-channel
+- Consider whether the base address adding and multiply by block size should be done in tensor.get_list() as opposed to tt_malloc
+
+# Trace run to figure out allocators and allocation size
 
 # Tensor functionality
-Sort out ownership of the address mapping, who and when calls deallocate, in the presence of multiple TT views of the same data
+- Tony will need to make such that I don't need to initialize every RAM, or else we need to support init of 8b, 4, and 2b data types.
+- Hashing to six / 8 channels and hashed address generation for multi-channel
 
 # Netlist API functionality
 

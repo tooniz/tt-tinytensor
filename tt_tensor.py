@@ -7,14 +7,26 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 class tt_tensor(): 
     id = 0
-    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Bfp8_b):
+    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Float16, parent_tensor=None):
         self.id = tt_tensor.id
         tt_tensor.id = tt_tensor.id + 1
         # save local references for block size, the dram allocator and chip grid
         self.simd_cluster = simd_cluster
         self.block_size = block_size
-        self.virtual_block_size = block_size
         self.dtype = dtype
+        self.parent = parent_tensor
+        # Initialize virtual block size and set 'transpose lowest two dimensions' flag to False
+        self.virtual_block_size = block_size
+        self.transpose_r_c = False
+        # handle setting of torch.dtype (for to_device() and from_device())
+        if(dtype == tt_dtype.Float32):
+            self.torch_dtype = torch.float32
+        elif(dtype == tt_dtype.Float16):
+            self.torch_dtype = torch.float16
+        elif(dtype == tt_dtype.Float16_b):
+            self.torch_dtype = torch.bfloat16
+        else:
+            self.torch_dtype = None
 
         # Tiny Tensors can be initialized via a torch tensor
         if(torch_tensor != None):
@@ -30,34 +42,30 @@ class tt_tensor():
         # initialize empty tensor with the right shape
         self.address_tensor = torch.empty(self.shape)
 
-        # Call the allocator to get the new tensor filled with allocated DRAM addresses
-        self.address_tensor = simd_cluster.allocate_tensor(self)
+        # allocate memory if you are not a 'view' of an existing tensor
+        # and if the back end API 
+        if(parent_tensor == None):
+            # Call the allocator to get the new tensor filled with allocated DRAM addresses
+            self.address_tensor = simd_cluster.allocate_tensor(self)
 
-        # Initialize 'transpose lowest two dimensions' flag to False
-        self.transpose_r_c = False
-
-        # Hack to work around the need to initialize each RAM
-        list_shape = list(self.shape)
-        list_shape[-1] = int(list_shape[-1] * block_size)
-        list_shape[-2] = int(list_shape[-2] * block_size)
-
-        if(dtype == tt_dtype.Float32):
-            self.torch_dtype = torch.float32
-        elif(dtype == tt_dtype.Float16):
-            self.torch_dtype = torch.float16
-        elif(dtype == tt_dtype.Float16_b):
-            self.torch_dtype = torch.bfloat16
-        else:
-            self.torch_dtype = None
-        zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
-        self.to_device(0,zeros) 
+            # if a device back end is set up, initialize the allocated memory on device
+            if(self.simd_cluster.be_api != None):
+                # Hack to work around the need to initialize each RAM
+                list_shape = list(self.shape)
+                list_shape[-1] = int(list_shape[-1] * block_size)
+                list_shape[-2] = int(list_shape[-2] * block_size)
+                zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
+                self.to_device(0,zeros) 
 
     def __del__(self):
         # once tt_tensor goes out of scope
         # de-allocate space you had reserved via the attached tt allocator
-        log_string = "DEALLOCATING TT TENSOR with ID: " + str(self.id)
-        logging.debug(log_string)
-        self.simd_cluster.deallocate_tensor(self)
+        # but only if the tensor is not a 'view' (ie if it's a parent,
+        # that has allocated and owns the underlying storage tensor)
+        if(self.parent == None):
+            log_string = "DEALLOCATING TT TENSOR with ID: " + str(self.id)
+            logging.debug(log_string)
+            self.simd_cluster.deallocate_tensor(self)
 
     def get_dram_list(self, tensor_slice):
         flat_addr_tensor = self.address_tensor.flatten(start_dim=2,end_dim=-3)
@@ -147,22 +155,53 @@ class tt_tensor():
         back_2d = flattened.reshape(tensor.shape[-2], tensor.shape[-1])
         return back_2d
 
+    def broadcast_to(self, bcast_spec):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.broadcast_to(bcast_spec)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def reshape(self, reshape_spec):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.reshape(reshape_spec)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def unsqueeze(self, dim):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.unsqueeze(dim)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def expand(self, expand_spec):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.reshape(expand_spec)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def swapaxes(self, ax0, ax1):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.swapaxes(ax0,ax1)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def permute(self, permute_spec):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.permute(permute_spec)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def view(self, view_spec):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = new_tensor.address_tensor.permute(view_spec)
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def stride(self):
+        return self.address_tensor.stride()
+
     def split(self):
         pass
 
-    def view(self):
-        # View changes on the Torch tensor are propagated to the Tensor of block addresses
-        # allowing copy-free view changes on the sharded on-device tensors so long as blocks
-        # remain atomic
-        pass
-    def permute(self):
-        # Permute allows interchanging dimensions of the Torch tensor
-        # the block address tensor will follow original torch Tensor permutes
-        # allowing copy-free dimension permutes on the sharded on-device tensors so long as blocks
-        # remain atomic.
-        # If the bottom two axis are permuted, this is a standard 2D transpose - and will be captured
-        # as a transpose flag (self.bottom_dim_transpose_flag=True)
-        # Transposed axis is supported in Tenstorrent netlists
-        pass
 
 

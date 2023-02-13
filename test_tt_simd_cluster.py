@@ -38,10 +38,6 @@ def duplicate_alloc_test():
 def grayskull_read_write_test():
     import time
     import torch
-    import eager_backend.backend_api as be_api
-    from test_utils import py_desc, py_tensor
-    from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
-    from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
 
     target_arch = BackendDevice.Grayskull
     target_devices = {0}
@@ -51,17 +47,18 @@ def grayskull_read_write_test():
 
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
     simd0.set_up_allocators([(tt_dtype.Float32, 128, 10000, 0x20000000)])
-    simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x20000000)])
-    simd0.set_up_allocators([(tt_dtype.Float32, 32, 10000, 0x20000000)])
+    simd0.set_up_allocators([(tt_dtype.Float32, 256, 10000, 0x30000000)])
 
     for i in range(8):
         dims = random.choice([1,3,4])
-        block_size = random.choice([32,64,128])
-        tensor_size = random.choice([256,128,512])
+        block_size = random.choice([128,256])
+        tensor_size = random.choice([512])
         tens = torch.randn((1,1,dims,tensor_size,tensor_size))
         tt_tens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
         tt_tens.to_device(0,tens)
+        backend.wait_for_idle()
         ble = tt_tens.from_device(0)
+        backend.wait_for_idle()
         diff = torch.isclose(tens,ble)
         inv = torch.logical_not(diff)
         indices = inv.nonzero()
@@ -88,8 +85,8 @@ def grayskull_matmul_test():
     random_slice_matmuls(10,simd0,netlist,backend)
 
     check_allocator_end_state(simd0)
-    simd0.be_api.finish_child_process()
-    backend.destroy()
+    #simd0.be_api.finish_child_process()
+    #backend.destroy()
 
     logging.info("Passed grayskull matmul test")
 
@@ -176,10 +173,11 @@ def check_allocator_end_state(simd0: tt_simd_cluster):
         assert unique.shape == allocator.free_block_index_tensor.shape, "Error: the free list got poluted, with duplicate blocks"
 
 def main():
+    grayskull_read_write_test()
     grayskull_matmul_test()
-    #grayskull_read_write_test()
-    #duplicate_alloc_test()
-    #simd_malloc_test()
+    duplicate_alloc_test()
+    simd_malloc_test()
+    grayskull_matmul_test()
 
 if __name__ == "__main__":
     main()

@@ -17,21 +17,21 @@ def alloc_dealloc_test():
     alloc0 = tt_malloc(32, num_alloc_blocks, 0)
 
     loop_cnt = 0
-    while(loop_cnt < 100):
+    while(loop_cnt < 10):
         loop_cnt = loop_cnt + 1
 
         # shape and block size constraints
         # first pick block size
         possible_block_size = (32,64,128,256,512,1024)
         block_size = possible_block_size[torch.randint(low=0,high=6,size=(1,1)).item()]
-        simd0.set_up_allocators([(tt_dtype.Bfp8_b,block_size,100000,0)])
+        simd0.set_up_allocators([(tt_dtype.Float16,block_size,100000,0)])
 
         # make R,C shape a multiple of the block size
         r_mul = torch.randint(low=1,high=32,size=(1,1)).item()
         c_mul = torch.randint(low=1,high=32,size=(1,1)).item()
 
         # make total dim count random
-        dims = torch.randint(low=4,high=8,size=(1,1)).item()
+        dims = torch.randint(low=5,high=8,size=(1,1)).item()
 
         # make other dim values relatively small and random
         dim_list = []

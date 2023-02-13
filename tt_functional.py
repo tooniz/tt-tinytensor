@@ -1,40 +1,46 @@
 import torch
 import torch.nn.functional as functional
-
+from 
 tt_path_flag = False
 
 def matmul(lin, rin, tt_runtime = None):
-    #figure out folding factors to get nice squares that match the processor grid
-    # use really stupid algorithm that works for popular transformers
-    # - assume left input rows is smallest dimension
-    # - assume it fits onto cores
-    # - fold to that dimension
-    target_dim = int(lin.shape[-2])
-    id_fold = int(lin.shape[-1] / lin.shape[-2])
-    col_fold = int(rin.shape[-1] / lin.shape[-2])
-    lin_folded, rin_folded = fold_for_matmul(lin, rin, rowfactor=1, colfactor=col_fold, idfactor=id_fold)
+    # assume minimum dimension fits into both cores and max amount of dram queues
+    # for now...
+    min_dim = min(lin.shape[-2], min(lin.shape[-1], rin.shape[-1]))
+    row_fold = int(lin.shape[-2] / min_dim)
+    id_fold = int(lin.shape[-1] / min_dim)
+    col_fold = int(rin.shape[-1] / min_dim)
+    lin_folded, rin_folded = fold_for_matmul(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
     if(tt_runtime == None):
         out = torch.matmul(lin_folded, rin_folded)
-        out = torch.sum(out,-3)
-        out = unfold_output(out,rowfactor=1,colfactor=col_fold)
+        out = sum(out,-3)
+        out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
     golden = torch.matmul(lin,rin)
     assert torch.allclose(out, golden, atol=0.005, rtol=0.005)
     return out
 
-def linear(acts, weights, bias, output=None):
-    out = functional.linear(acts,weights,bias)
-    if(output != None):
-        output.copy_(out)
+def sum(tensor, dim, tt_runtime=None):
+    if(tt_runtime == None):
+        out = torch.sum(tensor, dim)
+    else:
+        # swap sum dimension and columns
+        tens = tensor.swapaxes(-1,dim)
+        ones = tt_tensor()
+        tens = matmul(tens,ones)
+        pass
+    return out
+
+def add(linput, rinput, tt_runtime: None):
+    out = linput + rinput
+    return out
+
+def linear(acts, weights, bias, tt_runtime = None):
+    out = matmul(acts,weights, tt_runtime)
+    out = add(out, bias, tt_runtime)
     return out
 
 def softmax(input, dim, output=None):
     out = functional.softmax(input, dim)
-    if(output != None):
-        output.copy_(out)
-    return out
-
-def add(linput, rinput, output=None):
-    out = linput + rinput
     if(output != None):
         output.copy_(out)
     return out
