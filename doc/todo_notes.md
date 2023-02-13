@@ -31,6 +31,8 @@ Add further checking to SIMD allocator and malloc test
 - Graphs with multiple target devices for netlist brevity
 - Light weight queue command that will leave everything the same but change dram queue addresses to read/write
 - Sync primitives so that working with RAMs can be done safely
+- Buda runtime to return stats about last run command, into a data structure that developer can parse
+- Netlist to enable targetting devices that are smaller than a chip - ie nVidia MiG
 - Matmul and max reduce that can keep accumulating across 'light epochs', to reduce across slice dimensions
 - Ensure using RAMs is as performant for reads/writes/reblocking as with queues
 - Ability to loop program on local devices without hacks

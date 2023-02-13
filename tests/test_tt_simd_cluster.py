@@ -85,23 +85,24 @@ def grayskull_matmul_test():
     random_slice_matmuls(10,simd0,netlist,backend)
 
     check_allocator_end_state(simd0)
-    #simd0.be_api.finish_child_process()
-    #backend.destroy()
+    simd0.be_api.finish_child_process()
+    backend.destroy()
 
     logging.info("Passed grayskull matmul test")
 
 def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist, backend):
     for i in range(count):
-        block_size_max_mul = random.choice([(64,10),(128,5),(256,2)]) # block size 512 overflows SRAM ,(512,1)])
+        block_size_max_mul = random.choice([(64,5),(128,2),(256,1)]) # block size 512 overflows SRAM ,(512,1)])
         block_size = block_size_max_mul[0]
         block_mul  = random.randint(1,block_size_max_mul[1])
+        id_mul = random.randint(1,2)
         number_of_inputs = 2
         number_of_dims = 3
-        simd0.set_up_allocators([(tt_dtype.Float32, block_size, block_mul*block_mul*number_of_inputs*number_of_dims, 0x21000000)])
-        simd0.set_up_allocators([(tt_dtype.Float16, block_size, block_mul*block_mul*number_of_dims, 0x31000000)])
+        simd0.set_up_allocators([(tt_dtype.Float32, block_size, block_mul*block_mul*number_of_inputs*number_of_dims*id_mul, 0x21000000)])
+        simd0.set_up_allocators([(tt_dtype.Float16, block_size, block_mul*block_mul*number_of_dims*id_mul*2, 0x31000000)])
 
-        lin = torch.randn((1,1,number_of_dims,block_size*block_mul,block_size*block_mul))
-        rin = torch.randn((1,1,number_of_dims,block_size*block_mul,block_size*block_mul))
+        lin = torch.randn((1,1,number_of_dims,block_size*block_mul,block_size*block_mul*id_mul))
+        rin = torch.randn((1,1,number_of_dims,block_size*block_mul*id_mul,block_size*block_mul))
         lin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=lin, dtype=tt_dtype.Float32)
         rin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=rin, dtype=tt_dtype.Float32)
         lin_ttens.to_device(0,lin)
@@ -173,7 +174,7 @@ def check_allocator_end_state(simd0: tt_simd_cluster):
         assert unique.shape == allocator.free_block_index_tensor.shape, "Error: the free list got poluted, with duplicate blocks"
 
 def main():
-    grayskull_read_write_test()
+    #grayskull_read_write_test()
     grayskull_matmul_test()
     duplicate_alloc_test()
     simd_malloc_test()

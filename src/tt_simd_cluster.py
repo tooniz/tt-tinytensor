@@ -42,6 +42,9 @@ class tt_simd_cluster():
     def __init__(self, r: int, c: int, ids: tuple, be_api = None):
         self.r = r
         self.c = c
+        self.r_cores = 10
+        self.c_cores = 12
+        self.queue_lim = 30
         self.ids = ids
         self.allocators = {}
         self.be_api = be_api

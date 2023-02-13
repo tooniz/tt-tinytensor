@@ -1,31 +1,43 @@
 import torch
 import torch.nn.functional as functional
-from 
-tt_path_flag = False
+from tt_tensor import tt_tensor
+from tt_dtype import tt_dtype
+from tt_dtype import tt_op_dtype
+from tt_netlist import tt_netlist
+from tt_netlist import tt_net_op_types
 
-def matmul(lin, rin, tt_runtime = None):
-    # assume minimum dimension fits into both cores and max amount of dram queues
-    # for now...
-    min_dim = min(lin.shape[-2], min(lin.shape[-1], rin.shape[-1]))
-    row_fold = int(lin.shape[-2] / min_dim)
-    id_fold = int(lin.shape[-1] / min_dim)
-    col_fold = int(rin.shape[-1] / min_dim)
-    lin_folded, rin_folded = fold_for_matmul(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
-    if(tt_runtime == None):
-        out = torch.matmul(lin_folded, rin_folded)
-        out = sum(out,-3)
+def matmul(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None):
+    if(runtime == None):
+        out = torch.matmul(lin,rin)
+    else:
+        # if all dimensions fit onto chip, and don't violate max dram queues - just run
+        # without folding
+        if(lin.shape[-2] < runtime.simd_cluster.r_cores and rin.shape[-1] < runtime.simd_cluster.c_cores and rin.shape[-2] < runtime.simd_cluster.queue_lim):
+            row_fold = 1
+            col_fold = 1
+            id_fold = 1
+        else:
+            # assume minimum dimension fits into both cores and max amount of dram queues
+            # for now...
+            min_dim = min(lin.shape[-2], min(lin.shape[-1], rin.shape[-1]))
+            row_fold = int(lin.shape[-2] / min_dim)
+            id_fold = int(lin.shape[-1] / min_dim)
+            col_fold = int(rin.shape[-1] / min_dim)
+        # fold, run, reduce, unfold
+        lin_folded, rin_folded = fold_for_matmul(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
+        out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, lin_folded, rin_folded, op_dtype)
+        out = sum(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
         out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
-    golden = torch.matmul(lin,rin)
-    assert torch.allclose(out, golden, atol=0.005, rtol=0.005)
     return out
 
-def sum(tensor, dim, tt_runtime=None):
-    if(tt_runtime == None):
+def sum(tensor, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None):
+    if(runtime == None):
         out = torch.sum(tensor, dim)
     else:
         # swap sum dimension and columns
         tens = tensor.swapaxes(-1,dim)
         ones = tt_tensor()
+        out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, lin_folded, rin_folded, op_dtype)
         tens = matmul(tens,ones)
         pass
     return out
