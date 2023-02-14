@@ -67,7 +67,7 @@ def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None):
         out = out.squeeze(dim)
     return out
 
-def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(fold_factors is None):
         # assume minimum dimension fits into both cores and max amount of dram queues
         # for now...
@@ -77,11 +77,13 @@ def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dty
         col_fold = int(rin.shape[-1] / min_dim)
 
         if(lin.shape[-2] < runtime.simd_cluster.r_cores and rin.shape[-1] < runtime.simd_cluster.c_cores and rin.shape[-2] < runtime.simd_cluster.queue_lim):
-            lin_folded = lin
-            rin_folded = rin
             row_fold = 1
             col_fold = 1
             id_fold = 1
+            if(op.name == "matmul"):
+                lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
+            else:
+                lin_folded, rin_folded = bcast_inputs(lin,rin)
         else:
             if(op.name == "matmul"):
                 lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
@@ -90,8 +92,10 @@ def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dty
     else:
         row_fold, col_fold, id_fold = fold_factors
         if(row_fold is 1 and col_fold is 1 and id_fold is 1):
-            lin_folded = lin
-            rin_folded = rin
+            if(op.name == "matmul"):
+                lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
+            else:
+                lin_folded, rin_folded = bcast_inputs(lin,rin)
         else:
             if(op.name == "matmul"):
                 lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
@@ -144,25 +148,25 @@ def matmul(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, f
     if(runtime is None):
         return torch.matmul(lin,rin)
     else:
-        return tt_binary_elementwise_op(tt_net_op_types.matmul, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        return tt_binary_op(tt_net_op_types.matmul, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
 def add(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
         return lin+rin
     else:
-        return tt_binary_elementwise_op(tt_net_op_types.add, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        return tt_binary_op(tt_net_op_types.add, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
 def subtract(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
         return lin - rin
     else:
-        return tt_binary_elementwise_op(tt_net_op_types.subtract, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        return tt_binary_op(tt_net_op_types.subtract, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
 def multiply(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
         return lin * rin
     else:
-        return tt_binary_elementwise_op(tt_net_op_types.multiply, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        return tt_binary_op(tt_net_op_types.multiply, lin, rin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
 def exp(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
@@ -265,6 +269,106 @@ def fold_inputs(linput, rinput, rowfactor, colfactor):
     rrshp = rrshp.swapaxes(-2,-3)
     return lrshp, rrshp
 
+######
+# Input broadcasting will ensure that compatible inputs will
+# be broadcast to the same dimensions
+# this is done manually since the two chip dimensions throw
+# off pytorch/numpy automatic broadcasting semantics
+#
+# *** For Non Matmuls
+# find differences in dimensionality
+# confirm dimensionality >= 3
+# add dimensions right below chips to match dimensionality
+# expand dimensions that differ
+def bcast_inputs(lin, rin):
+    assert len(lin.shape) >= 3
+    assert len(rin.shape) >= 3
+    dim_l = len(lin.shape)
+    dim_r = len(rin.shape)
+    if(dim_l > dim_r):
+        dim_diff = dim_l - dim_r
+        dim = dim_l
+        for _ in range(dim_diff):
+            lin = lin.unsqueeze(dim=2)
+    elif(dim_r > dim_l):
+        dim_diff = dim_r - dim_l
+        dim = dim_r
+        for _ in range(dim_diff):
+            rin = rin.unsqueeze(dim=2)
+    else:
+        dim = dim_l
+    expand_mask_l = []
+    expand_mask_r = []
+    # do not touch chip dims
+    expand_mask_l.append(-1)
+    expand_mask_l.append(-1)
+    expand_mask_r.append(-1)
+    expand_mask_r.append(-1)
+    for i in range(2, dim): # do not touch chip dims
+        if(lin.shape[i] > rin.shape[i]):
+            assert lin.shape[i] % rin.shape[i] == 0
+            expand_mask_r.append(int(lin.shape[i]/rin.shape[i]))
+        else:
+            expand_mask_r.append(-1)
+        if(rin.shape[i] > lin.shape[i]):
+            assert rin.shape[i] % lin.shape[i] == 0
+            expand_mask_l.append(int(rin.shape[i]/lin.shape[i]))
+        else:
+            expand_mask_l.append(-1)
+    return lin.expand(expand_mask_l), rin.expand(expand_mask_r)
+
+######
+# Input broadcasting will ensure that compatible inputs will
+# be broadcast to the same dimensions
+# this is done manually since the two chip dimensions throw
+# off pytorch/numpy automatic broadcasting semantics
+# *** For matmuls
+# confirm inner dimension matches
+# confirm dimensionality >= 4
+# do not mess with bottom two dimensions
+# for everything else - use method of non-matmuls
+def bcast_inputs_mm(lin, rin):
+    assert len(lin.shape) >= 4
+    assert len(rin.shape) >= 4
+    assert lin.shape[-1] == rin.shape[-2]
+    dim_l = len(lin.shape)
+    dim_r = len(rin.shape)
+    if(dim_l > dim_r):
+        dim_diff = dim_l - dim_r
+        dim = dim_l
+        for _ in range(dim_diff):
+            lin = lin.unsqueeze(dim=2)
+    elif(dim_r > dim_l):
+        dim_diff = dim_r - dim_l
+        dim = dim_r
+        for _ in range(dim_diff):
+            rin = rin.unsqueeze(dim=2)
+    else:
+        dim = dim_l
+    expand_mask_l = []
+    expand_mask_r = []
+    # do not touch chip dims
+    expand_mask_l.append(-1)
+    expand_mask_l.append(-1)
+    expand_mask_r.append(-1)
+    expand_mask_r.append(-1)
+    for i in range(2, dim-2): # do not touch chip dims OR row/col
+        if(lin.shape[i] > rin.shape[i]):
+            assert lin.shape[i] % rin.shape[i] == 0
+            expand_mask_r.append(int(lin.shape[i]/rin.shape[i]))
+        else:
+            expand_mask_r.append(-1)
+        if(rin.shape[i] > lin.shape[i]):
+            assert rin.shape[i] % lin.shape[i] == 0
+            expand_mask_l.append(int(rin.shape[i]/lin.shape[i]))
+        else:
+            expand_mask_l.append(-1)
+    # do not touch row/col dims
+    expand_mask_l.append(-1)
+    expand_mask_l.append(-1)
+    expand_mask_r.append(-1)
+    expand_mask_r.append(-1)
+    return lin.expand(expand_mask_l), rin.expand(expand_mask_r)
 
 def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
     print(linput.shape)
@@ -275,10 +379,7 @@ def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
     assert linput.shape[-2] % rowfactor == 0
     assert rinput.shape[-1] % colfactor == 0
     # expand to equal dimensions before folding
-    if(len(list(linput.shape)) > len(list(rinput.shape))):
-       rrshp = rinput.broadcast_to(linput.shape)
-    elif(len(list(rinput.shape)) > len(list(linput.shape))):
-       lrshp = linput.broadcast_to(linput.shape)
+    lrshp, rrshp = bcast_inputs_mm(linput, rinput)
     # figure out reshaped dims
     out_cols = int(rinput.shape[-1] / colfactor)
     out_rows = int(linput.shape[-2] / rowfactor)

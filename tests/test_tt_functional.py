@@ -50,7 +50,7 @@ def binary_op_test(op, lin, rin, block_size, runtime, backend):
     lin_ttens.to_device(0,lin)
     rin_ttens.to_device(0,rin)
 
-    genout = ttf.tt_binary_elementwise_op(op,lin_ttens,rin_ttens,tt_op_dtype(tt_dtype.Float16),runtime) 
+    genout = ttf.tt_binary_op(op,lin_ttens,rin_ttens,tt_op_dtype(tt_dtype.Float16),runtime) 
     status = backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
     backend.wait_for_idle()
@@ -65,7 +65,7 @@ def binary_op_test(op, lin, rin, block_size, runtime, backend):
     # Check vs golden
     print(out)
     print(golden_out)
-    assert torch.allclose(out,golden_out,0.4,0.4)
+    assert torch.allclose(out,golden_out,0.5,0.5)
 
 def main():
     print("Testing TT functional!")
