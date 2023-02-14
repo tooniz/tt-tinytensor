@@ -8,5 +8,8 @@ class tt_runtime():
         self.be_api = be_api
         self.backend = backend
     def __del__(self):
-        self.be_api.finish_child_process()
-        self.backend.destroy()
+        pass
+        # self.be_api.finish_child_process()
+        # self.backend.destroy()
+        # del(self.backend)
+        # self.backend = None
