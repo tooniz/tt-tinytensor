@@ -33,8 +33,8 @@ def test_matmul():
     simd0.set_up_allocators([(tt_dtype.Float16, 64, 10000, 0x31000000)])
 
     ## Meat
-    lin = torch.randn((1,1,1,512,256))
-    rin = torch.randn((1,1,1,256,4096))
+    lin = torch.randn((1,1,1,512,1024))
+    rin = torch.randn((1,1,1,1024,256))
 
     binary_op_test(tt_net_op_types.matmul, lin, rin, block_size=64, runtime=runtime, backend=backend)
 
@@ -55,12 +55,17 @@ def binary_op_test(op, lin, rin, block_size, runtime, backend):
     assert status == BackendStatusCode.Success
     backend.wait_for_idle()
 
+    print ("Genout shape: ", genout.shape)
     out = genout.from_device(0)
     out = out.type(torch.float32)
     golden_out = torch.matmul(lin,rin)
 
+    max_diff = torch.max(torch.abs(out - golden_out))
+    print("Maximum difference: ", max_diff)
     # Check vs golden
-    torch.allclose(out,golden_out)
+    print(out)
+    print(golden_out)
+    assert torch.allclose(out,golden_out,0.4,0.4)
 
 def main():
     print("Testing TT functional!")

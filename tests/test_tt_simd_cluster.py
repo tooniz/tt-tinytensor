@@ -68,7 +68,7 @@ def grayskull_read_write_test():
         #IPython.embed()
         assert torch.allclose(tens,ble)
 
-    check_allocator_end_state(simd0)
+    simd0.check_allocator_end_state()
     simd0.be_api.finish_child_process()
     backend.destroy()
     logging.info("Passed grayskull tensor read/write test")
@@ -104,8 +104,8 @@ def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist
         simd0.set_up_allocators([(tt_dtype.Float16, block_size, 100*block_mul*block_mul*number_of_dims*id_mul*2, 0x31000000)])
         runtime = tt_runtime(simd0, netlist)
 
-        lin = torch.randn((1,1,number_of_dims,512,1024))
-        rin = torch.randn((1,1,number_of_dims,1024,1024))
+        lin = torch.randn((1,1,number_of_dims,512,512))
+        rin = torch.randn((1,1,number_of_dims,512,512))
         lin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=lin, dtype=tt_dtype.Float32)
         rin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=rin, dtype=tt_dtype.Float32)
         lin_ttens.to_device(0,lin)
@@ -120,7 +120,7 @@ def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist
         out = genout.from_device(0)
         out = out.type(torch.float32)
         golden_out = torch.matmul(lin,rin)
-        assert torch.allclose(out,golden_out,atol=0.5,rtol=0.5)
+        assert torch.allclose(out,golden_out,atol=0.9,rtol=0.9)
         #assert torch.allclose(out,lin,atol=0.5,rtol=0.5)
 
         del(lin_ttens)

@@ -79,6 +79,9 @@ def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dty
         if(lin.shape[-2] < runtime.simd_cluster.r_cores and rin.shape[-1] < runtime.simd_cluster.c_cores and rin.shape[-2] < runtime.simd_cluster.queue_lim):
             lin_folded = lin
             rin_folded = rin
+            row_fold = 1
+            col_fold = 1
+            id_fold = 1
         else:
             if(op.name == "matmul"):
                 lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
@@ -96,14 +99,16 @@ def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dty
                 lin_folded, rin_folded = fold_inputs(lin, rin, row_fold, col_fold)
 
     out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype)
+    print("Fold factors: ", op.name, row_fold, col_fold, id_fold, out.shape, lin.shape, rin.shape, lin_folded.shape, rin_folded.shape)
 
     if(id_fold is not 1):
         out = reduce(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
-    else:
+    elif(row_fold is not 1 or col_fold is not 1):
         # squeeze out the reduction dimension, if its just a placeholder
         out = out.squeeze(dim=-3)
 
     if(row_fold is not 1 or col_fold is not 1 or id_fold is not 1):
+        print("Fold factors: ", row_fold, col_fold, id_fold, out.shape)
         out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
 
     return out
@@ -262,16 +267,18 @@ def fold_inputs(linput, rinput, rowfactor, colfactor):
 
 
 def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
+    print(linput.shape)
+    print(rinput.shape)
     # check basic assumptions
     assert linput.shape[-1] == rinput.shape[-2]
     assert linput.shape[-1] % idfactor == 0
     assert linput.shape[-2] % rowfactor == 0
     assert rinput.shape[-1] % colfactor == 0
     # expand to equal dimensions before folding
-    if(sum(list(linput.shape)) > sum(list(rinput.shape))):
-        rrshp = rinput.broadcast_to(linput.shape)
-    elif(sum(list(rinput.shape)) > sum(list(linput.shape))):
-        lrshp = linput.broadcast_to(linput.shape)
+    if(len(list(linput.shape)) > len(list(rinput.shape))):
+       rrshp = rinput.broadcast_to(linput.shape)
+    elif(len(list(rinput.shape)) > len(list(linput.shape))):
+       lrshp = linput.broadcast_to(linput.shape)
     # figure out reshaped dims
     out_cols = int(rinput.shape[-1] / colfactor)
     out_rows = int(linput.shape[-2] / rowfactor)
