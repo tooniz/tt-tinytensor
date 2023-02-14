@@ -5,6 +5,7 @@ from tt_dtype import tt_dtype
 from tt_dtype import tt_op_dtype
 from tt_netlist import tt_netlist
 from tt_netlist import tt_net_op_types
+from eager_backend import BackendStatusCode
 
 # def matmul(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None):
 #     if(runtime == None):
@@ -48,27 +49,33 @@ def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None):
     if(runtime == None):
         out = torch.sum(input, dim)
     else:
-        # swap sum dimension and columns
-        tens = input.swapaxes(-1,dim)
-        # generated the ones tensor to reduce row-wise
-        ones_shape = list(tens.shape)
-        c = ones_shape.pop()
-        r = ones_shape.pop()
-        torch_ones_shape = ones_shape.copy()
-        ones_shape.append(c)
-        ones_shape.append(1)
-        torch_ones_shape.append(c*input.virtual_block_size)
-        torch_ones_shape.append(1*input.virtual_block_size)
-        ones = tt_tensor(block_size=input.virtual_block_size, simd_cluster=runtime.simd_cluster, shape=ones_shape, dtype=op_dtype.dt)
-        torch_ones = torch.ones(torch_ones_shape)
-        ones.to_device(0, torch_ones)
-        out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, tens, ones, op_dtype)
-        out = out.swapaxes(-1,dim)
-        out = out.squeeze(dim)
+        if(input.shape[dim] == 1):
+            out = input.squeeze(dim)
+        else:
+            # swap sum dimension and columns
+            tens = input.swapaxes(-1,dim)
+            # generated the ones tensor to reduce row-wise
+            ones_shape = list(tens.shape)
+            c = ones_shape.pop()
+            r = ones_shape.pop()
+            torch_ones_shape = ones_shape.copy()
+            ones_shape.append(c)
+            ones_shape.append(1)
+            torch_ones_shape.append(c*input.virtual_block_size)
+            torch_ones_shape.append(1*input.virtual_block_size)
+            ones = tt_tensor(block_size=input.virtual_block_size, simd_cluster=runtime.simd_cluster, shape=ones_shape, dtype=op_dtype.dt)
+            torch_ones = torch.ones(torch_ones_shape)
+            ones.to_device(0, torch_ones)
+            out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, tens, ones, op_dtype)
+            status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+            assert status == BackendStatusCode.Success
+            runtime.backend.wait_for_idle()
+            out = out.swapaxes(-1,dim)
+            out = out.squeeze(dim)
     return out
 
 def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
-    if(fold_factors is None):
+    if(fold_factors == None):
         # assume minimum dimension fits into both cores and max amount of dram queues
         # for now...
         min_dim = min(lin.shape[-2], min(lin.shape[-1], rin.shape[-1]))
@@ -91,7 +98,7 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
                 lin_folded, rin_folded = fold_inputs(lin, rin, row_fold, col_fold)
     else:
         row_fold, col_fold, id_fold = fold_factors
-        if(row_fold is 1 and col_fold is 1 and id_fold is 1):
+        if((row_fold == 1) and (col_fold == 1) and (id_fold == 1)):
             if(op.name == "matmul"):
                 lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
             else:
@@ -103,16 +110,20 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
                 lin_folded, rin_folded = fold_inputs(lin, rin, row_fold, col_fold)
 
     out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype)
-    print("Fold factors: ", op.name, row_fold, col_fold, id_fold, out.shape, lin.shape, rin.shape, lin_folded.shape, rin_folded.shape)
+    status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+    assert status == BackendStatusCode.Success
+    runtime.backend.wait_for_idle()
 
-    if(id_fold is not 1):
+    #print("Fold factors: ", op.name, row_fold, col_fold, id_fold, out.shape, lin.shape, rin.shape, lin_folded.shape, rin_folded.shape)
+
+    if(id_fold != 1):
         out = reduce(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
-    elif(row_fold is not 1 or col_fold is not 1):
+    elif((row_fold != 1) or (col_fold != 1)):
         # squeeze out the reduction dimension, if its just a placeholder
         out = out.squeeze(dim=-3)
 
-    if(row_fold is not 1 or col_fold is not 1 or id_fold is not 1):
-        print("Fold factors: ", row_fold, col_fold, id_fold, out.shape)
+    if((row_fold != 1) or (col_fold != 1) or (id_fold != 1)):
+        #print("Fold factors: ", row_fold, col_fold, id_fold, out.shape)
         out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
 
     return out
@@ -130,15 +141,19 @@ def tt_unary_elementwise_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
     else:
-        row_fold, col_fold = fold_factors
-        if(row_fold is 1 and col_fold is 1):
+        row_fold = fold_factors[0]
+        col_fold = fold_factors[1]
+        if((row_fold == 1) and (col_fold == 1)):
             lin_folded = lin
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
 
     out = runtime.netlist.unary_tensor_op(op, lin_folded, op_dtype)
+    status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+    assert status == BackendStatusCode.Success
+    runtime.backend.wait_for_idle()
 
-    if(row_fold is not 1 or col_fold is not 1):
+    if((row_fold != 1) or (col_fold != 1)):
         out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
 
     return out
@@ -173,6 +188,12 @@ def exp(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_fact
         return torch.exp(lin)
     else:
         return tt_unary_elementwise_op(tt_net_op_types.exp, lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+
+def reciprocal(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(runtime is None):
+        return (1/lin)
+    else:
+        return tt_unary_elementwise_op(tt_net_op_types.reciprocal, lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
 def linear(acts, weights, bias, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
