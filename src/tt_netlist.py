@@ -19,6 +19,9 @@ class tt_net_op_types(Enum):
     queue = 5
     ram = 6
     nop = 10
+    reciprocal = 11
+    exp = 12
+
 
 class tt_netlist:
     def __init__(self):

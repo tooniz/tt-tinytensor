@@ -8,6 +8,8 @@ import time
 import torch
 from tt_netlist import tt_netlist
 from tt_netlist import tt_net_op_types
+from tt_runtime import tt_runtime
+import tt_functional as ttf
 import eager_backend.backend_api as be_api
 from test_utils import py_desc, py_tensor
 from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
@@ -84,7 +86,7 @@ def grayskull_matmul_test():
     # Run some matmuls
     random_slice_matmuls(10,simd0,netlist,backend)
 
-    check_allocator_end_state(simd0)
+    simd0.check_allocator_end_state()
     simd0.be_api.finish_child_process()
     backend.destroy()
 
@@ -98,18 +100,19 @@ def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist
         id_mul = random.randint(1,2)
         number_of_inputs = 2
         number_of_dims = 3
-        simd0.set_up_allocators([(tt_dtype.Float32, block_size, block_mul*block_mul*number_of_inputs*number_of_dims*id_mul, 0x21000000)])
-        simd0.set_up_allocators([(tt_dtype.Float16, block_size, block_mul*block_mul*number_of_dims*id_mul*2, 0x31000000)])
+        simd0.set_up_allocators([(tt_dtype.Float32, block_size, 100*block_mul*block_mul*number_of_inputs*number_of_dims*id_mul, 0x21000000)])
+        simd0.set_up_allocators([(tt_dtype.Float16, block_size, 100*block_mul*block_mul*number_of_dims*id_mul*2, 0x31000000)])
+        runtime = tt_runtime(simd0, netlist)
 
-        lin = torch.randn((1,1,number_of_dims,block_size*block_mul,block_size*block_mul*id_mul))
-        rin = torch.randn((1,1,number_of_dims,block_size*block_mul*id_mul,block_size*block_mul))
+        lin = torch.randn((1,1,number_of_dims,512,1024))
+        rin = torch.randn((1,1,number_of_dims,1024,1024))
         lin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=lin, dtype=tt_dtype.Float32)
         rin_ttens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=rin, dtype=tt_dtype.Float32)
         lin_ttens.to_device(0,lin)
         rin_ttens.to_device(0,rin)
 
         #genout = netlist.unary_tensor_op(tt_net_op_types.nop, lin_ttens, tt_op_dtype(tt_dtype.Float16))
-        genout = netlist.binary_tensor_op(tt_net_op_types.matmul, lin_ttens, rin_ttens, tt_op_dtype(tt_dtype.Float16))
+        genout = ttf.matmul(lin_ttens,rin_ttens,tt_op_dtype(tt_dtype.Float16),runtime) #netlist.binary_tensor_op(tt_net_op_types.matmul, lin_ttens, rin_ttens, tt_op_dtype(tt_dtype.Float16))
         status = backend.compile_and_run_netlist(netlist.get_last_netlist_name(), {})
         assert status == BackendStatusCode.Success
         backend.wait_for_idle()
@@ -160,18 +163,8 @@ def simd_malloc_test():
         del tns0
 
     # Go through allocators and check that everything was de-allocated properly
-    check_allocator_end_state(simd0)
+    simd0.check_allocator_end_state()
     logging.info("Successfully allocated: ", i+1, " tensors")
-
-def check_allocator_end_state(simd0: tt_simd_cluster):
-    # Go through allocators and check that everything was de-allocated properly
-    for allocator in simd0.allocators.values():
-        # check the free list is back to being fully free
-        assert list(allocator.free_block_index_tensor.shape)[0] == allocator.num_blocks, "Error: deallocator did not put back all blocks"
-
-        # check the blocks in the free list are unique
-        unique = torch.unique(allocator.free_block_index_tensor)
-        assert unique.shape == allocator.free_block_index_tensor.shape, "Error: the free list got poluted, with duplicate blocks"
 
 def main():
     #grayskull_read_write_test()

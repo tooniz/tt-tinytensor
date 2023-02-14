@@ -1,131 +1,72 @@
-import random
-import math
 import torch
-import tt_functional as tt_functional
-import torch.nn.functional as torch_functional
+import random
+import logging
+from tt_simd_cluster import tt_simd_cluster
+from tt_simd_cluster import tt_dtype, tt_op_dtype
+from tt_tensor import tt_tensor
+import time
+import torch
+from tt_netlist import tt_netlist
+from tt_netlist import tt_net_op_types
+from tt_runtime import tt_runtime
+import tt_functional as ttf
+import eager_backend.backend_api as be_api
+from test_utils import py_desc, py_tensor
+from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
+from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
+from IPython import embed
+import tt_functional as ttf
+from tt_netlist import tt_net_op_types
 
-def tt_ffn(input, w0, b0, w1, b1):
-    # derive tensor shapes
-    in_shape = input.shape
-    ff2_shape = in_shape
-    ff1_shape = in_shape[:-1] + (w0.shape[-1],)
-    # declare tensors before use
-    ff1_t = torch.Tensor(ff1_shape)
-    gelu_t = torch.Tensor(ff1_shape)
-    ff2_t = torch.Tensor(ff2_shape)
-    out_t = torch.Tensor(ff2_shape)
-    # run functional ops
-    tt_functional.linear(input,w0,b0,ff1_t)
-    tt_functional.gelu(ff1_t,gelu_t)
-    tt_functional.linear(gelu_t,w1,b1,ff2_t)
-    tt_functional.add(input,ff2_t, out_t)
-    return out_t
+def test_matmul():
+    target_arch = BackendDevice.Grayskull
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices)
 
-def torch_ffn(input, w0, b0, w1, b1):
-    x = torch_functional.linear(input,w0,b0)
-    x = torch_functional.gelu(x)
-    x = torch_functional.linear(x,w1,b1)
-    x = x + input
-    return x
+    simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
+    netlist = tt_netlist()
+    runtime = tt_runtime(simd0, netlist)
 
-def transpose_for_scores(x: torch.Tensor, d_model, num_heads) -> torch.Tensor:
-    new_x_shape = x.size()[:-1] + (num_heads, int(d_model/num_heads))
-    x = x.view(new_x_shape)
-    return x.permute(0, 2, 1, 3)
+    simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x21000000)])
+    simd0.set_up_allocators([(tt_dtype.Float16, 64, 10000, 0x31000000)])
 
-def torch_selfattn(d_model, num_heads, input, wk, bk, wq, bq, wv, bv, wl, bl):
-    # qkv projections
-    q = torch_functional.linear(input,wq,bq)
-    k = torch_functional.linear(input,wk,bk)
-    v = torch_functional.linear(input,wv,bv)
- 
-    # reshape so that heads are 2D slices
-    # and num_heads is the 3rd dimensions
-    q_s = transpose_for_scores(q, d_model, num_heads)
-    k_s = transpose_for_scores(k, d_model, num_heads)
-    v_s = transpose_for_scores(v, d_model, num_heads)
+    ## Meat
+    lin = torch.randn((1,1,1,512,256))
+    rin = torch.randn((1,1,1,256,4096))
 
-    # transpose key heads for attn score matmul
-    k_t = k_s.transpose(-1, -2)
+    binary_op_test(tt_net_op_types.matmul, lin, rin, block_size=64, runtime=runtime, backend=backend)
 
-    # attn score matmul
-    attn = torch.matmul(q_s, k_t)
+    simd0.check_allocator_end_state()
+    simd0.be_api.finish_child_process()
+    backend.destroy()
 
-    # normalize by 1/sqrt(d_model)
-    attn_norm = attn / math.sqrt(d_model)
+    logging.info("Passed tt.functional matmul test")
 
-    # softmax
-    attn_smax = torch_functional.softmax(attn_norm, dim=-1)
+def binary_op_test(op, lin, rin, block_size, runtime, backend):
+    lin_ttens = tt_tensor(block_size=64, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
+    rin_ttens = tt_tensor(block_size=64, simd_cluster=runtime.simd_cluster, torch_tensor=rin, dtype=tt_dtype.Float32)
+    lin_ttens.to_device(0,lin)
+    rin_ttens.to_device(0,rin)
 
-    # linearly recombine v_s
-    v_mix = torch.matmul(attn_smax, v_s)
+    genout = ttf.tt_binary_elementwise_op(op,lin_ttens,rin_ttens,tt_op_dtype(tt_dtype.Float16),runtime) 
+    status = backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+    assert status == BackendStatusCode.Success
+    backend.wait_for_idle()
 
-    # reshape v_mix back to 2D (heads stacked)
-    v_mix = v_mix.permute(0, 2, 1, 3).contiguous()
-    new_v_mix_shape = v_mix.size()[:-2] + (d_model,)
-    v_mix = v_mix.view(new_v_mix_shape)
+    out = genout.from_device(0)
+    out = out.type(torch.float32)
+    golden_out = torch.matmul(lin,rin)
 
-    # apply final linear
-    lin = torch_functional.linear(v_mix,wl,bl)
-    return lin
-
-
-####
-# Below here is tt_functional test code
-def test_ffn():
-    # randomize dims and num heads
-    dmodel_mul = random.randint(1,32)
-    seqlen_mul = random.randint(1,32)
-    dmodel = 32 * dmodel_mul
-    seqlen = 32 * seqlen_mul
-
-    # generate random weights
-    input = torch.randn(seqlen,dmodel)
-    w0 = torch.randn(dmodel,dmodel)
-    w1 = torch.randn(dmodel,dmodel)
-    b0 = torch.randn(1,dmodel)
-    b1 = torch.randn(1,dmodel)
-
-    # generate random input tensors
-    input = torch.randn(seqlen,dmodel)
-
-    tt_out = tt_ffn(input,w0,b0,w1,b1)
-    torch_out = torch_ffn(input,w0,b0,w1,b1)
-
-    assert torch.allclose(tt_out,torch_out)
-    print("Passed: tt ffn vs torch ffn")
-
-def test_self_attn():
-    # randomize dims
-    dmodel_mul = random.randint(1,512)
-    seqlen_mul = random.randint(1,512)
-    num_head_pow = random.randint(1,3)
-
-    dmodel = 32 * dmodel_mul
-    seqlen = 32 * seqlen_mul
-    num_heads = 2 ** num_head_pow
-
-    # generate random weights
-    wk = torch.randn(dmodel,dmodel)
-    bk = torch.randn(1,dmodel)
-    wq = torch.randn(dmodel,dmodel)
-    bq = torch.randn(1,dmodel)
-    wv = torch.randn(dmodel,dmodel)
-    bv = torch.randn(1,dmodel)
-    wl = torch.randn(dmodel,dmodel)
-    bl = torch.randn(1,dmodel)
-
-    # generate random input tensors
-    input = torch.randn(1,seqlen,dmodel)
-
-    # tt_out = tt_ffn(input,w0,b0,w1,b1)
-    torch_out = torch_selfattn(dmodel, num_heads, input,wk,bk,wq,bq,wv,bv,wl,bl)
+    # Check vs golden
+    torch.allclose(out,golden_out)
 
 def main():
     print("Testing TT functional!")
     #test_self_attn()
-    for x in range(10):
-        test_ffn()
+    for x in range(1):
+        test_matmul()
 
 if __name__ == "__main__":
     main()

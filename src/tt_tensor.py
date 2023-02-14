@@ -82,7 +82,7 @@ class tt_tensor():
     def get_dram_addr_tensor_slice(self, slice: int):
         # just return the indices for initial test
         addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3)
-        return addr_tensor_flat[0][0][slice]
+        return addr_tensor_flat[0][0][slice].contiguous()
 
     def get_dram_chan_tensor_slice(self, slice: int):
         # put everything in channel one for initial test
@@ -107,14 +107,14 @@ class tt_tensor():
         assert self.torch_dtype is not None
 
         # Generate flat view of tensor dims except for chip dims and 2D slices
-        addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3)
+        addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3).contiguous()
         iterations = addr_tensor_flat.shape[2]
 
         # create read target tensor
         tensor_shape = list(self.address_tensor.shape)
         tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
         tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
-        read_tensor = torch.empty(tensor_shape)
+        read_tensor = torch.empty(tensor_shape).contiguous()
         read_tensor.type(self.torch_dtype)
 
         # flat view of read target tensor
@@ -156,44 +156,66 @@ class tt_tensor():
         return back_2d
 
     def broadcast_to(self, bcast_spec):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.broadcast_to(bcast_spec)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.broadcast_to(bcast_spec)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 
     def reshape(self, reshape_spec):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.reshape(reshape_spec)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.reshape(reshape_spec)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 
     def unsqueeze(self, dim):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.unsqueeze(dim)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.unsqueeze(dim)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 
     def expand(self, expand_spec):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.reshape(expand_spec)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.expand(expand_spec)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 
     def swapaxes(self, ax0, ax1):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.swapaxes(ax0,ax1)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.swapaxes(ax0,ax1)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 
     def permute(self, permute_spec):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.permute(permute_spec)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.permute(permute_spec)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        return new_tensor
+
+    def squeeze(self, dim):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.squeeze(dim)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 
     def view(self, view_spec):
-        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self)
-        new_tensor.address_tensor = new_tensor.address_tensor.permute(view_spec)
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.address_tensor = self.address_tensor.view(view_spec)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
 

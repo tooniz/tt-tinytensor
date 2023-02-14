@@ -85,3 +85,12 @@ class tt_simd_cluster():
             logging.exception("Trying to de-allocate dram without having properly configured allocator for a given block, data type")
             assert False
 
+    def check_allocator_end_state(self):
+        # Go through allocators and check that everything was de-allocated properly
+        for allocator in self.allocators.values():
+            # check the free list is back to being fully free
+            assert list(allocator.free_block_index_tensor.shape)[0] == allocator.num_blocks, "Error: deallocator did not put back all blocks"
+
+            # check the blocks in the free list are unique
+            unique = torch.unique(allocator.free_block_index_tensor)
+            assert unique.shape == allocator.free_block_index_tensor.shape, "Error: the free list got poluted, with duplicate blocks"
