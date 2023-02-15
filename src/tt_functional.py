@@ -61,7 +61,6 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
         else:
             lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
             folded = True
-
     out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype)
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
@@ -348,6 +347,7 @@ def bcast_inputs_mm(lin, rin):
             lin = lin.unsqueeze(dim=2)
     else:
         dim = dim_l
+    assert len(lin.shape) == len(rin.shape)
     expand_mask_l = []
     expand_mask_r = []
     # do not touch chip dims
@@ -400,15 +400,13 @@ def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
     lrshp = lrshp.reshape(l_shape)
     rrshp = rrshp.reshape(r_shape)
     # swap axes to make r,c at bottom
-    lrshp = lrshp.swapaxes(-2,-3)
-    rrshp = rrshp.swapaxes(-2,-3)
-    rrshp = rrshp.swapaxes(-3,-4)
+    lrshp = lrshp.swapaxes(-2,-3) # rowfactor,idfactor,out_rows,out_id
+    rrshp = rrshp.swapaxes(-2,-3) # 
+    rrshp = rrshp.swapaxes(-3,-4) # colfactor,idfactor,out_id,out_cols
     # add extra dims for broadcasting to each others shape
-    lrshp = lrshp.unsqueeze(-4)
-    rrshp = rrshp.unsqueeze(-5)
+    lrshp = lrshp.unsqueeze(-4) # rowfactor,1,idfactor,out_rows,out_id
+    rrshp = rrshp.unsqueeze(-5) # 1,colfactor,idfactor,out_id,out_cols
     # broadcast to each others shapes
-    l_shape = lrshp.shape
-    r_shape = rrshp.shape
     lrshp, rrshp = bcast_inputs_mm(lrshp, rrshp)
     return lrshp, rrshp
 
