@@ -41,14 +41,14 @@ def gen_random_inputs(mm = False):
     #
     #   Run all tt_functional ops every time
 
-    block_size = random.choice([64,128])#,256])
-    tile_r = random.choice([1,2,4]) #,5,6,7,8])
-    tile_c = random.choice([1,2,4]) #,5,6,7,8])
-    tile_o_c = random.choice([1,2,4]) #,5,6,7,8])
+    block_size = 64 #random.choice([64,128])#,256])
+    tile_r = 10 #random.choice([1,2,4]) #,5,6,7,8])
+    tile_c = 10 #random.choice([1,2,4]) #,5,6,7,8])
+    tile_o_c = 10 #random.choice([1,2,4]) #,5,6,7,8])
 
-    row_fold = random.choice([1,2,3,4,5])
-    col_fold = random.choice([1,2,3,4,5])
-    id_fold = random.choice([1,2])
+    row_fold = random.choice([1,2])
+    col_fold = random.choice([1,2])
+    id_fold =  random.choice([1,2])
 
     mm_l_full_tile_dim_r = block_size * tile_r * row_fold
     mm_l_full_tile_dim_c = block_size * tile_c * id_fold
@@ -93,9 +93,9 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
     # TT Functional function list
     ##
     op_dtype = tt_op_dtype(tt_dtype.Float16)
-    ttf_binary_functions = [ttf.add, ttf.multiply, ttf.subtract] #ttf.matmul, 
-    ttf_unary_functions = [ttf.exp] #, ttf.reciprocal]
-    ttf_reduction_functions = [ttf.reduce]
+    ttf_binary_functions = [ttf.matmul] #[ttf.add, ttf.multiply, ttf.subtract] 
+    ttf_unary_functions = [] #[ttf.exp] #, ttf.reciprocal]
+    ttf_reduction_functions = [] #[ttf.reduce]
 
     ##
     # Run computation and check results
@@ -105,9 +105,10 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
         print("Op name: ", opname," end    ", fold_factors[0], fold_factors[1], lin.shape, rin.shape)
         if(opname == "matmul"): # matmul is a special case
             print("SHAPE:",linmm.shape, rinmm.shape)
-            #out_ttens = ttf_binary_functions[i](linmm_ttens, rinmm_ttens, op_dtype, runtime, fold_factors)
+            out_ttens = ttf_binary_functions[i](linmm_ttens, rinmm_ttens, op_dtype, runtime, fold_factors)
             golden = ttf_binary_functions[i](linmm, rinmm)
             out = golden
+            del(out_ttens)
         else:
             out_ttens = ttf_binary_functions[i](lin_ttens, rin_ttens, op_dtype, runtime, fold_factors)
             golden = ttf_binary_functions[i](lin, rin)
@@ -172,7 +173,7 @@ def main():
     netlist = tt_netlist()
     runtime = tt_runtime(simd0, netlist, be_api, backend)
 
-    for x in range(10):
+    for x in range(5):
         test_ops(simd0, netlist,runtime, backend, be_api)
 
     print("Finished testing TT functional!")

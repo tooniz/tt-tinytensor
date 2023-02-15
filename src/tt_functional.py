@@ -7,44 +7,6 @@ from tt_netlist import tt_netlist
 from tt_netlist import tt_net_op_types
 from eager_backend import BackendStatusCode
 
-# def matmul(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None):
-#     if(runtime == None):
-#         out = torch.matmul(lin,rin)
-#     else:
-#         # if all dimensions fit onto chip, and don't violate max dram queues - just run
-#         # without folding
-#         if(lin.shape[-2] < runtime.simd_cluster.r_cores and rin.shape[-1] < runtime.simd_cluster.c_cores and rin.shape[-2] < runtime.simd_cluster.queue_lim):
-#             row_fold = 1
-#             col_fold = 1
-#             id_fold = 1
-#             out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, lin, rin, op_dtype)
-#         else:
-#             # assume minimum dimension fits into both cores and max amount of dram queues
-#             # for now...
-#             min_dim = min(lin.shape[-2], min(lin.shape[-1], rin.shape[-1]))
-#             row_fold = int(lin.shape[-2] / min_dim)
-#             id_fold = int(lin.shape[-1] / min_dim)
-#             col_fold = int(rin.shape[-1] / min_dim)
-#             # fold, run, reduce, unfold
-#             lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
-#             out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, lin_folded, rin_folded, op_dtype)
-#             print("Out shape: ",lin.shape, rin.shape, out.shape)
-#             if(id_fold is not 1):
-#                 import sys
-#                 original_stdout = sys.stdout
-#                 with open('reduce.txt', 'w') as f:
-#                     sys.stdout = f # Change the standard output to the file we created.
-#                     print('This message will be written to a file.')
-#                     sys.stdout = original_stdout
-#                 out = reduce(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
-#             else:
-#                 # squeeze out the reduction dimension, if its just a placeholder
-#                 out = out.squeeze(dim=-3)
-#             out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
-
-#         print("Fold factors: ", row_fold, col_fold, id_fold)
-#     return out
-
 def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None):
     if(runtime == None):
         out = torch.sum(input, dim)
@@ -75,6 +37,7 @@ def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None):
     return out
 
 def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    folded = False
     if(fold_factors == None):
         # assume minimum dimension fits into both cores and max amount of dram queues
         # for now...
@@ -87,43 +50,30 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
             row_fold = 1
             col_fold = 1
             id_fold = 1
-            if(op.name == "matmul"):
-                lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
-            else:
-                lin_folded, rin_folded = bcast_inputs(lin,rin)
+            lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
         else:
-            if(op.name == "matmul"):
-                lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
-            else:
-                lin_folded, rin_folded = fold_inputs(lin, rin, row_fold, col_fold)
+            lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
+            folded = True
     else:
         row_fold, col_fold, id_fold = fold_factors
         if((row_fold == 1) and (col_fold == 1) and (id_fold == 1)):
-            if(op.name == "matmul"):
-                lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
-            else:
-                lin_folded, rin_folded = bcast_inputs(lin,rin)
+            lin_folded, rin_folded = bcast_inputs_mm(lin,rin)
         else:
-            if(op.name == "matmul"):
-                lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
-            else:
-                lin_folded, rin_folded = fold_inputs(lin, rin, row_fold, col_fold)
+            lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
+            folded = True
 
     out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype)
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
     runtime.backend.wait_for_idle()
 
-    #print("Fold factors: ", op.name, row_fold, col_fold, id_fold, out.shape, lin.shape, rin.shape, lin_folded.shape, rin_folded.shape)
+    if(folded):
+        if(id_fold != 1):
+            out = reduce(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
+        else:
+            # squeeze out the reduction dimension, if its just a placeholder
+            out = out.squeeze(dim=-3)
 
-    if(id_fold != 1):
-        out = reduce(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
-    elif((row_fold != 1) or (col_fold != 1)):
-        # squeeze out the reduction dimension, if its just a placeholder
-        out = out.squeeze(dim=-3)
-
-    if((row_fold != 1) or (col_fold != 1) or (id_fold != 1)):
-        print("Fold factors: ", row_fold, col_fold, id_fold, out.shape)
         out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
 
     return out
@@ -296,7 +246,6 @@ def fold_inputs(linput, rinput, rowfactor, colfactor):
     assert linput.shape[-2] % rowfactor == 0
     assert rinput.shape[-1] % colfactor == 0
     assert rinput.shape[-2] % rowfactor == 0
-    print("Fold nomm input:", rowfactor, colfactor, linput.address_tensor.shape, rinput.address_tensor.shape)
     # expand to equal dimensions before folding
     lrshp, rrshp = bcast_inputs(linput,rinput)
     # if(sum(list(linput.shape)) > sum(list(rinput.shape))):
@@ -320,7 +269,6 @@ def fold_inputs(linput, rinput, rowfactor, colfactor):
     # swap axes to make r,c at bottom
     lrshp = lrshp.swapaxes(-2,-3)
     rrshp = rrshp.swapaxes(-2,-3)
-    print("Fold nomm output:", rowfactor, colfactor, lrshp.address_tensor.shape, rrshp.address_tensor.shape)
 
     return lrshp, rrshp
 
@@ -426,8 +374,6 @@ def bcast_inputs_mm(lin, rin):
     return lin.expand(expand_mask_l), rin.expand(expand_mask_r)
 
 def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
-    print(linput.shape)
-    print(rinput.shape)
     # check basic assumptions
     assert linput.shape[-1] == rinput.shape[-2]
     assert linput.shape[-1] % idfactor == 0
@@ -435,7 +381,6 @@ def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
     assert rinput.shape[-1] % colfactor == 0
     # expand to equal dimensions before folding
     lrshp, rrshp = bcast_inputs_mm(linput, rinput)
-    print("Fold input shapes:", lrshp.shape, rrshp.shape, rowfactor, colfactor, idfactor)
     # figure out reshaped dims
     out_cols = int(rrshp.shape[-1] / colfactor)
     out_rows = int(lrshp.shape[-2] / rowfactor)
@@ -461,27 +406,13 @@ def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
     # add extra dims for broadcasting to each others shape
     lrshp = lrshp.unsqueeze(-4)
     rrshp = rrshp.unsqueeze(-5)
-    #print("Fold pre-expand shapes:", lrshp.shape, rrshp.shape, rowfactor, colfactor, idfactor)
-    #l_expand = make_expand_mask(list(lrshp.shape),-4,rrshp.shape[-4])
-    #r_expand = make_expand_mask(list(rrshp.shape),-5,lrshp.shape[-5])
-    #lrshp = lrshp.expand(l_expand)
-    #rrshp = rrshp.expand(r_expand)
-    print("Fold post-expand shapes:", lrshp.shape, rrshp.shape, rowfactor, colfactor, idfactor)
     # broadcast to each others shapes
     l_shape = lrshp.shape
     r_shape = rrshp.shape
     lrshp, rrshp = bcast_inputs_mm(lrshp, rrshp)
-    #lrshp = lrshp.broadcast_to(r_shape)
-    #rrshp = rrshp.broadcast_to(l_shape)
-    print("Fold output shapes:", lrshp.shape, rrshp.shape)
-    print(linput.address_tensor)
-    print(lrshp.address_tensor)
-    print(rinput.address_tensor)
-    print(rrshp.address_tensor)
     return lrshp, rrshp
 
 def unfold_output(input, rowfactor, colfactor):
-    print("Unfold input shape: ",input.shape, rowfactor, colfactor)
     shape = list(input.shape)
     c = shape[-1]
     r = shape[-2]
@@ -491,7 +422,6 @@ def unfold_output(input, rowfactor, colfactor):
     mr = r * rowfactor
     shape.append(mr)
     shape.append(mc)
-    print("Unfold output pre-reshape shape: ",shape, rowfactor, colfactor)
     return input.swapaxes(-2,-3).reshape(shape)
 
 
