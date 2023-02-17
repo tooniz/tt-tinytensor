@@ -31,7 +31,8 @@ class tt_tensor():
         # Tiny Tensors can be initialized via a torch tensor
         if(torch_tensor != None):
             # account for blocking and make dimensions -1, -2 smaller by factor of block size
-            self.shape = tuple(torch_tensor.shape[:-2] + (int(torch_tensor.shape[-2]/block_size),int(torch_tensor.shape[-1]/block_size)))
+            self.shape = tuple(torch_tensor.shape[:-2] + (torch_tensor.shape[-2] // block_size, torch_tensor.shape[-1] // block_size))
+            assert self.shape[-2] * block_size == torch_tensor.size(-2) and self.shape[-1] * block_size == torch_tensor.size(-1)
         else:
             # or via a specifically supplied shape
             if(shape != None):

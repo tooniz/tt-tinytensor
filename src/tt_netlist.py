@@ -5,6 +5,7 @@ from tt_tensor import tt_tensor
 from tt_dtype import tt_dtype
 from tt_dtype import tt_op_dtype
 from tt_dtype import tt_math_fidelity
+from eager_backend import BackendDevice
 import IPython
 
 class IndentDumper(yaml.Dumper):
@@ -24,7 +25,7 @@ class tt_net_op_types(Enum):
 
 
 class tt_netlist:
-    def __init__(self):
+    def __init__(self, arch=BackendDevice.Grayskull):
         self.doc = {}
         self.doc['queues'] = {}
         self.doc['devices'] = {}
@@ -35,6 +36,7 @@ class tt_netlist:
 
         self.last_netlist_filename = None
         self.next_netlist_idx = 0
+        self.arch = arch
 
     def start_netlist(self):
         pass
@@ -266,10 +268,15 @@ class tt_netlist:
         assert self.last_netlist_filename != None
         return self.last_netlist_filename
 
+    def arch_to_str(self, arch):
+        arch_map = {BackendDevice.Grayskull: 'grayskull',
+                    BackendDevice.Wormhole: 'wormhole'}
+        return arch_map[arch]
+
     def dump_netlist(self):
         self.last_netlist_filename = 'netlist_' + str(self.next_netlist_idx) + '.yaml'
         self.doc['devices'] = {}
-        self.doc['devices']['arch'] = 'grayskull'
+        self.doc['devices']['arch'] = self.arch_to_str(self.arch)
         with open(self.last_netlist_filename, 'w') as yaml_file:
             yaml.dump(self.doc, yaml_file, Dumper=IndentDumper, sort_keys=False, default_flow_style=False)
             yaml_file.close()
