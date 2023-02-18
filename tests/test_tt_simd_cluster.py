@@ -51,10 +51,11 @@ def grayskull_read_write_test():
     simd0.set_up_allocators([(tt_dtype.Float32, 128, 10000, 0x20000000)])
     simd0.set_up_allocators([(tt_dtype.Float32, 256, 10000, 0x30000000)])
 
-    for i in range(8):
+    simd0.set_up_allocators([(tt_dtype.Float32, 512, 10000, 0x10000000)])
+    for i in range(50):
         dims = random.choice([1,3,4])
-        block_size = random.choice([128,256])
-        tensor_size = random.choice([512])
+        block_size = random.choice([128,256,512])
+        tensor_size = random.choice([512,1024])
         tens = torch.randn((1,1,dims,tensor_size,tensor_size))
         tt_tens = tt_tensor(block_size=block_size, simd_cluster=simd0, torch_tensor=tens, dtype=tt_dtype.Float32)
         tt_tens.to_device(0,tens)
@@ -102,7 +103,7 @@ def random_slice_matmuls(count: int, simd0: tt_simd_cluster, netlist: tt_netlist
         number_of_dims = 3
         simd0.set_up_allocators([(tt_dtype.Float32, block_size, 100*block_mul*block_mul*number_of_inputs*number_of_dims*id_mul, 0x21000000)])
         simd0.set_up_allocators([(tt_dtype.Float16, block_size, 100*block_mul*block_mul*number_of_dims*id_mul*2, 0x31000000)])
-        runtime = tt_runtime(simd0, netlist)
+        runtime = tt_runtime(simd0, netlist, be_api, backend)
 
         lin = torch.randn((1,1,number_of_dims,512,512))
         rin = torch.randn((1,1,number_of_dims,512,512))
@@ -167,11 +168,10 @@ def simd_malloc_test():
     logging.info("Successfully allocated: ", i+1, " tensors")
 
 def main():
-    #grayskull_read_write_test()
-    grayskull_matmul_test()
-    duplicate_alloc_test()
-    simd_malloc_test()
-    grayskull_matmul_test()
+    grayskull_read_write_test()
+    #grayskull_matmul_test()
+    #duplicate_alloc_test()
+    #simd_malloc_test()
 
 if __name__ == "__main__":
     main()

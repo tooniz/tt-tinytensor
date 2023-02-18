@@ -7,7 +7,7 @@ from tt_netlist import tt_netlist
 from tt_netlist import tt_net_op_types
 from eager_backend import BackendStatusCode
 
-def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None):
+def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None, fold_factors = None):
     if(runtime == None):
         out = torch.sum(input, dim)
     else:
@@ -183,10 +183,17 @@ def linear(acts, weights, bias, op_dtype = tt_op_dtype(tt_dtype.Float16), runtim
         out = add(out, bias, op_dtype, runtime, fold_factors)
     return out
 
-def softmax(input, dim, output=None):
-    out = functional.softmax(input, dim)
-    if(output != None):
-        output.copy_(out)
+def softmax(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(runtime is None):
+        out = functional.softmax(input, dim)
+    else:
+        print("here")
+        expo = exp(lin=lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        red  = reduce(expo, dim, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        red = red.unsqueeze(-1)
+        red_recip = reciprocal(red, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        print(expo.shape, red.shape, red_recip.shape, expo.dtype.name, red_recip.dtype.name)
+        out = multiply(expo, red_recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
 
 def gelu(input, output=None):

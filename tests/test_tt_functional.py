@@ -162,19 +162,25 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
     runtime.simd_cluster.check_allocator_end_state()
 
 def transpose_test(simd0, netlist, runtime, backend, be_api):
-    simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x11000000)])
+    block_size = 64
     simd0.set_up_allocators([(tt_dtype.Float16, 64, 10000, 0x21000000)])
 
-    lin = torch.randn(1,1,1,512,1024)
-    rin = torch.randn(1,1,1,1024,1024)
+    lin = torch.randn(1,1,1,512,640)
+    rin = torch.randn(1,1,1,512,640)
 
     lin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
     rin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=rin, dtype=tt_dtype.Float32)
+    lin_ttens.to_device(0,lin)
+    rin_ttens.to_device(0,rin)
+    transposed = rin_ttens.transpose()
+    row_fold = random.choice([1,2,4])
+    col_fold = random.choice([1,2,4])
+    out_ttens = ttf.matmul(lin_ttens, transposed, tt_op_dtype(tt_dtype.Float16), runtime, (1,1,2))
+    out = out_ttens.from_device(0)
+    out = out.type(torch.float32)
+    golden = torch.matmul(lin,torch.transpose(rin,-1,-2))
 
-    out_ttens = ttf_binary_functions[i](linmm_ttens, rinmm_ttens, op_dtype, runtime, fold_factors)
-
-    golden = torch.matmul(lin,rin)
-    assert torch.allclose(out,golden,0.5,0.5), "Maximum difference"
+    assert torch.allclose(out,golden,atol=5,rtol=0.005), "Maximum difference"
 
 
 def main():
@@ -188,9 +194,9 @@ def main():
     netlist = tt_netlist()
     runtime = tt_runtime(simd0, netlist, be_api, backend)
 
-    for x in range(5):
-        test_ops(simd0, netlist,runtime, backend, be_api)
-        #transpose_test(simd0, netlist,runtime, backend, be_api)
+    for x in range(10):
+        #test_ops(simd0, netlist,runtime, backend, be_api)
+        transpose_test(simd0, netlist,runtime, backend, be_api)
 
     print("Finished testing TT functional!")
 
@@ -199,3 +205,59 @@ def main():
     # print("Successfully done test")
 if __name__ == "__main__":
     main()
+
+
+
+# import torch
+# import random
+# import logging
+# from tt_simd_cluster import tt_simd_cluster
+# from tt_simd_cluster import tt_dtype, tt_op_dtype
+# from tt_tensor import tt_tensor
+# import time
+# import torch
+# from tt_netlist import tt_netlist
+# from tt_netlist import tt_net_op_types
+# from tt_runtime import tt_runtime
+# import tt_functional as ttf
+# import eager_backend.backend_api as be_api
+# from test_utils import py_desc, py_tensor
+# from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
+# from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
+# from IPython import embed
+# import tt_functional as ttf
+# from tt_netlist import tt_net_op_types
+# from tt_dtype import tt_op_dtype
+# from tt_dtype import tt_dtype
+# print("Testing TT functional!")
+# target_arch = BackendDevice.Grayskull
+# target_devices = {0}
+# config = be_api.get_runtime_config(target_arch)
+# backend = Backend(config, target_devices)
+# be_api.initialize_child_process(target_arch, target_devices)
+# simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
+# netlist = tt_netlist()
+# runtime = tt_runtime(simd0, netlist, be_api, backend)
+
+# simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x11000000)])
+# simd0.set_up_allocators([(tt_dtype.Float16, 64, 10000, 0x21000000)])
+# simd0.set_up_allocators([(tt_dtype.Float16_b, 64, 10000, 0x31000000)])
+
+# lin = torch.randn(1,1,1,512,128)
+# lin_ttens = tt_tensor(block_size=64, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
+# lin_ttens.to_device(0,lin)
+
+# import importlib
+# importlib.reload(ttf)
+# importlib.reload(tt_netlist)
+# tout = ttf.softmax(lin_ttens,-1,tt_op_dtype(dtype=tt_dtype.Float16_b,dtype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b),runtime,(1,1,1))
+# out = tout.from_device(0)
+# outfloat = out.type(torch.float32)
+
+# texp = torch.exp(lin)
+# tred = texp.sum(-1)
+# trecip = 1/tred
+# trecip_for_comp = trecip.unsqueeze(-1).broadcast_to(1,1,1,512,128)
+
+# trecip_for_use = trecip.unsqueeze(-1).broadcast_to(1,1,1,512,128)
+# tres = texp * trecip_for_use

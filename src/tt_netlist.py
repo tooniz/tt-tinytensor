@@ -133,12 +133,23 @@ class tt_netlist:
             slice_op_name = op_name + "_" + str(slice) + "_" + str(self.next_netlist_idx)
 
             # go through the current r_c slice and define queue
-            rdim_l = l_input.address_tensor.shape[-2]
-            cdim_l = l_input.address_tensor.shape[-1]
-            rdim_r = r_input.address_tensor.shape[-2]
-            cdim_r = r_input.address_tensor.shape[-1]
-            rdim_out = l_input.address_tensor.shape[-2]
-            cdim_out = r_input.address_tensor.shape[-1]
+            if(l_input.transpose_r_c):
+                rdim_l = l_input.address_tensor.shape[-1]
+                cdim_l = l_input.address_tensor.shape[-2]
+                rdim_out = l_input.address_tensor.shape[-1]
+            else:
+                rdim_l = l_input.address_tensor.shape[-2]
+                cdim_l = l_input.address_tensor.shape[-1]
+                rdim_out = l_input.address_tensor.shape[-2]
+
+            if(r_input.transpose_r_c):
+                rdim_r = r_input.address_tensor.shape[-1]
+                cdim_r = r_input.address_tensor.shape[-2]
+                cdim_out = r_input.address_tensor.shape[-1]
+            else:
+                rdim_r = r_input.address_tensor.shape[-2]
+                cdim_r = r_input.address_tensor.shape[-1]
+                cdim_out = r_input.address_tensor.shape[-1]
             self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim_l,cdim_l], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
             self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_rin', type = tt_net_op_types.ram, block_size = r_input.block_size, grid_size = [rdim_r,cdim_r], inputs = ['HOST'], op_dtype = tt_op_dtype(r_input.dtype), dram= r_input.get_dram_list(slice))
             self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim_out,cdim_out], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice))
@@ -151,7 +162,7 @@ class tt_netlist:
             rdim = output.address_tensor.shape[-2]
             cdim = output.address_tensor.shape[-1]
 
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype, lin_transpose=l_input.transpose_r_c, rin_transpose=r_input.transpose_r_c)
 
     def add_op(self, slice_idx: int, lin_tensor: tt_tensor, name: str, type: tt_net_op_types, \
             block_size: int, \
@@ -168,15 +179,20 @@ class tt_netlist:
             \
             bias: str = None,
             relu_en: str = None, relu_mode: str = None, relu_threshold: float = None, \
+            \
+            lin_transpose = False,
+            rin_transpose = False,
             approximate_mode: str = None,
     ):
         # initialize stuff
         attributes = False
         op_val_dict = {}
         attributes_dict = {}
+        lin_tm_list = []
+        rin_tm_list = []
 
         grid_loc = [0,0]
-        ublock_order = 'r' # r or c
+        ublock_order = 'r' #'r' # r or c
 
         #
         # figure out mbloc/ublock sizes
@@ -251,6 +267,14 @@ class tt_netlist:
 
         if(attributes is True):
             op_val_dict['attributes'] = attributes_dict
+
+        if(lin_transpose is True):
+            lin_tm_list.append('transpose')
+            op_val_dict['input_0_tms'] = lin_tm_list
+
+        if(rin_transpose is True):
+            rin_tm_list.append('transpose')
+            op_val_dict['input_1_tms'] = rin_tm_list
 
         # assign op val dictionary to the single entry op dict
         if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):

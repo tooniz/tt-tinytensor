@@ -32,9 +32,9 @@ class tt_math_fidelity(Enum):
     HiFi3 = 2
 
 class tt_op_dtype():
-    def __init__(self, dtype, dype_intermed=tt_dtype.Float16, dtype_accum=tt_dtype.Float16, fidelity: tt_math_fidelity = tt_math_fidelity.HiFi3):
+    def __init__(self, dtype, dtype_intermed=tt_dtype.Float16, dtype_accum=tt_dtype.Float16, fidelity: tt_math_fidelity = tt_math_fidelity.HiFi3):
         self.dt = dtype
-        self.dt_int = dype_intermed
+        self.dt_int = dtype_intermed
         self.dt_acc = dtype_accum
         self.fidelity = fidelity
 

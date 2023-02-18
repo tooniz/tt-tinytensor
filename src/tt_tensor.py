@@ -68,7 +68,12 @@ class tt_tensor():
             self.simd_cluster.deallocate_tensor(self)
 
     def get_dram_list(self, tensor_slice):
-        flat_addr_tensor = self.address_tensor.flatten(start_dim=2,end_dim=-3)
+        if(self.transpose_r_c):
+            # transpose the lower dims into untransposed form
+            # this is since the netlist/backend will do the actual transpose via a different mechanism
+            flat_addr_tensor = self.address_tensor.swapaxes(-1,-2).flatten(start_dim=2,end_dim=-3)
+        else:
+            flat_addr_tensor = self.address_tensor.flatten(start_dim=2,end_dim=-3)
         # bit_mask = torch.full(flat_addr_tensor[0,0,tensor_slice].shape,7,dtype=torch.int64)
         # channel = torch.bitwise_and(flat_addr_tensor[0,0,tensor_slice], bit_mask)
         # shift = torch.full((1,),3,dtype = torch.int64)
@@ -157,6 +162,7 @@ class tt_tensor():
 
     def broadcast_to(self, bcast_spec):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.broadcast_to(bcast_spec)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -165,6 +171,7 @@ class tt_tensor():
 
     def reshape(self, reshape_spec):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.reshape(reshape_spec)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -173,6 +180,7 @@ class tt_tensor():
 
     def unsqueeze(self, dim):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.unsqueeze(dim)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -181,6 +189,7 @@ class tt_tensor():
 
     def expand(self, expand_spec):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.expand(expand_spec)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -189,6 +198,7 @@ class tt_tensor():
 
     def swapaxes(self, ax0, ax1):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.swapaxes(ax0,ax1)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -197,6 +207,7 @@ class tt_tensor():
 
     def permute(self, permute_spec):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.permute(permute_spec)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -205,6 +216,7 @@ class tt_tensor():
 
     def squeeze(self, dim):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.squeeze(dim)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
@@ -213,11 +225,23 @@ class tt_tensor():
 
     def view(self, view_spec):
         new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
         new_tensor.address_tensor = self.address_tensor.view(view_spec)
         new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
         assert new_tensor.address_tensor.dtype == torch.int32
         new_tensor.shape = tuple(new_tensor.address_tensor.shape)
         return new_tensor
+
+    def transpose(self):
+        new_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=self.shape, dtype=self.dtype, parent_tensor=self)
+        new_tensor.transpose_r_c = self.transpose_r_c
+        new_tensor.address_tensor = self.address_tensor.swapaxes(-2,-1)
+        new_tensor.address_tensor = new_tensor.address_tensor.type(torch.int32)
+        assert new_tensor.address_tensor.dtype == torch.int32
+        new_tensor.shape = tuple(new_tensor.address_tensor.shape)
+        new_tensor.transpose_r_c = not new_tensor.transpose_r_c
+        return new_tensor
+
 
     def stride(self):
         return self.address_tensor.stride()
