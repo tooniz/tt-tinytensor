@@ -23,7 +23,7 @@ class tt_dram_accessor():
             'loc': IOLocation.Dram
         }
         self.be_api.init_queue(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), 1)
-        self.be_api.push_tensor(IOLocation.Dram, chip_id, py_desc(weight['chan']), py_desc(weight['addr']), py_desc(weight['data']), IOType.RandomAccess, 0)
+        self.be_api.push_tensor(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), py_desc(weight['data']), IOType.RandomAccess, 0)
 
     def read_tensor_slice(self,chip_id,data,chan,addr,torch_dtype):
         weight = {
@@ -39,15 +39,16 @@ class tt_dram_accessor():
         return out
 
 class tt_simd_cluster():
-    def __init__(self, r: int, c: int, ids: tuple, be_api = None):
+    def __init__(self, r: int, c: int, ids: tuple, be_api = None, arch=BackendDevice.Grayskull):
         self.r = r
         self.c = c
         self.r_cores = 10
-        self.c_cores = 12
+        self.c_cores = 12 if arch == BackendDevice.Grayskull else 8
         self.queue_lim = 30
         self.ids = ids
         self.allocators = {}
         self.be_api = be_api
+        self.arch = arch
         #self.netlist_api = tt_netlist
         if(be_api is not None):
             self.dram_accessor = tt_dram_accessor(be_api)
