@@ -22,6 +22,7 @@ class tt_net_op_types(Enum):
     nop = 10
     reciprocal = 11
     exp = 12
+    gelu = 13
 
 
 class tt_netlist:

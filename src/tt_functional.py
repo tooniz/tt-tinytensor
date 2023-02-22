@@ -1,4 +1,5 @@
 import torch
+import logging
 import torch.nn.functional as functional
 from tt_tensor import tt_tensor
 from tt_dtype import tt_dtype
@@ -196,10 +197,11 @@ def softmax(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, 
         out = multiply(expo, red_recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
 
-def gelu(input, output=None):
-    out = functional.gelu(input)
-    if(output != None):
-        output.copy_(out)
+def gelu(input, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if runtime is None:
+        out = functional.gelu(input)
+    else:
+        out = tt_unary_elementwise_op(tt_net_op_types.gelu, input, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
 
 def relu(input, output=None):
