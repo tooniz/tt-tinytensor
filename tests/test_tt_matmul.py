@@ -28,17 +28,19 @@ def test_matmul(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices, "./cluster_desc.yaml") # Why is user launching child process?
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
     op_dtype = tt_op_dtype(dtype)
-    block_size = 128
+    block_size = 64
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
-    shape = (1, 1, 1, 1024, 1024)
-    A = torch.randn(shape)
-    B = torch.randn(shape)
+    dims = 64, 512, 512
+    shape0 = (1, 1, 1, dims[0], dims[1])
+    shape1 = (1, 1, 1, dims[1], dims[2])
+    A = torch.randn(shape0)
+    B = torch.randn(shape1)
     golden = torch.matmul(A, B)
 
     logging.info("Creating empty tt_tensors")
@@ -143,7 +145,7 @@ def test_matmul_gelu_matmul(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices, "./cluster_desc.yaml") # Why is user launching child process?
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -196,9 +198,87 @@ def test_matmul_gelu_matmul(target_arch):
     be_api.finish_child_process()
     backend.destroy()
 
+
+def test_attn(target_arch):
+    '''
+    Functional attention module to test on WH
+    '''
+    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float32
+    op_dtype = tt_op_dtype(dtype)
+    block_size = 128 # can't be bigger than dhead, can't be so small we require 16x16 cores
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+
+    '''
+    Q, K, V projections
+    '''
+
+    s, dm, dh, nh = 256, 1024, 1024//4, 4
+    x = torch.randn(1, 1, 1, s, dm)
+    Wq, Wv, Wk = (torch.randn(1, 1, 1, dm, dm) for _ in range(3))
+    q = torch.matmul(x, Wq) # Ignore bias and weight tranposing
+    k = torch.matmul(x, Wk)
+    v = torch.matmul(x, Wv)
+
+    logging.info("Pushing weights to device")
+    tt_x = tt_tensor(block_size, simd, torch_tensor=x, dtype=dtype)
+    logging.info("pushed x to device")
+    tt_Wq = tt_tensor(block_size, simd, torch_tensor=Wq, dtype=dtype)
+    logging.info("pushed Wq to device")
+    tt_Wk = tt_tensor(block_size, simd, torch_tensor=Wk, dtype=dtype)
+    logging.info("pushed Wk to device")
+    tt_Wv = tt_tensor(block_size, simd, torch_tensor=Wv, dtype=dtype)
+    logging.info("pushed Wv to device")
+
+    tt_x.to_device(0, x)
+
+    tt_Wq.to_device(0, Wq)
+    tt_Wk.to_device(0, Wk)
+    tt_Wv.to_device(0, Wv)
+
+    tt_q = ttf.matmul(tt_x, tt_Wq, op_dtype=op_dtype, runtime=runtime)
+    tt_k = ttf.matmul(tt_x, tt_Wk, op_dtype=op_dtype, runtime=runtime)
+    tt_v = ttf.matmul(tt_x, tt_Wv, op_dtype=op_dtype, runtime=runtime)
+
+    tt_q_cpu = tt_q.from_device(0)
+    tt_k_cpu = tt_k.from_device(0)
+    tt_v_cpu = tt_v.from_device(0)
+
+    for exp, rec in zip([q, k, v], [tt_q_cpu, tt_k_cpu, tt_v_cpu]):
+        mse = torch.mean((exp - rec)**2)
+        logging.info(f"Mean Squared Error: {mse}")
+    
+    # exit()
+
+
+    # '''
+    # Q * K.T attention scores
+    # '''
+    # # s, d -> nh, s, dm
+    # q = q.reshape(s, nh, dh).permute(1,0,2)
+    # k = k.reshape(s, nh, dh).permute(1,2,0)
+    # scores = torch.matmul(q, k)
+    # print('expected scores shape:', scores.size())
+
+    # print('tt_k address tensor:')
+    # print(tt_k.address_tensor.size()) # torch.Size([1, 1, 1, 2, 8])
+    # # reshape in terms of blocks
+    # tt_scores = ttf.matmul(tt_q, tt_k, op_dtype=op_dtype, runtime=runtime, tms=[[{'hslice': [nh]}, 'tranpose'], [{'hslice': [nh]}]])
+    # print('tt_scores shape:', tt_scores.shape)
+
+    be_api.finish_child_process()
+    backend.destroy()
+
 def main(target_arch):
     # test_matmul_gelu_matmul(target_arch)
-    test_matmul(target_arch)
+    # test_matmul(target_arch)
+    test_attn(target_arch)
 
 if __name__ == '__main__':
     parser = ArgumentParser()

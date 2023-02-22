@@ -46,7 +46,7 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
         id_fold = int(lin.shape[-1] / min_dim)
         col_fold = int(rin.shape[-1] / min_dim)
 
-        if(lin.shape[-2] < runtime.simd_cluster.r_cores and rin.shape[-1] < runtime.simd_cluster.c_cores and rin.shape[-2] < runtime.simd_cluster.queue_lim):
+        if(lin.shape[-2] <= runtime.simd_cluster.r_cores and rin.shape[-1] <= runtime.simd_cluster.c_cores and rin.shape[-2] < runtime.simd_cluster.queue_lim):
             row_fold = 1
             col_fold = 1
             id_fold = 1
