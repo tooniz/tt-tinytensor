@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 class tt_tensor(): 
     id = 0
-    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Float16, parent_tensor=None):
+    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Float16, parent_tensor=None, target_device: int = 0):
         self.id = tt_tensor.id
         tt_tensor.id = tt_tensor.id + 1
         # save local references for block size, the dram allocator and chip grid
@@ -18,6 +18,7 @@ class tt_tensor():
         # Initialize virtual block size and set 'transpose lowest two dimensions' flag to False
         self.virtual_block_size = block_size
         self.transpose_r_c = False
+        self.target_device = target_device
         # handle setting of torch.dtype (for to_device() and from_device())
         if(dtype == tt_dtype.Float32):
             self.torch_dtype = torch.float32
@@ -56,7 +57,7 @@ class tt_tensor():
                 list_shape[-1] = int(list_shape[-1] * block_size)
                 list_shape[-2] = int(list_shape[-2] * block_size)
                 zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
-                self.to_device(0,zeros) 
+                self.to_device(target_device,zeros)
 
     def __del__(self):
         # once tt_tensor goes out of scope

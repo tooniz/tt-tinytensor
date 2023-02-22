@@ -198,6 +198,21 @@ def reduce_max(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fo
     else:
         return tt_reduce_op(tt_net_op_types.reduce, lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
+# copy the given input tt_tensor to the given chips
+# return a list of tensors that reside on each chip
+def tt_broadcast_op(input, chip_ids, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None):
+    out = runtime.netlist.unary_tensor_bcast_op(tt_net_op_types.nop, input, op_dtype, chip_ids)
+    status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+    assert status == BackendStatusCode.Success
+    runtime.backend.wait_for_idle()
+    return out
+
+def broadcast(input, chip_ids, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None):
+    if(runtime is None):
+        pass # TODO: implement
+    else:
+        return tt_broadcast_op(input, chip_ids, op_dtype, runtime)
+
 def matmul(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
         return torch.matmul(lin,rin)

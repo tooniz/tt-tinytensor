@@ -7,6 +7,7 @@ from tt_dtype import tt_op_dtype
 from tt_dtype import tt_math_fidelity
 from eager_backend import BackendDevice
 import IPython
+from typing import List, Set, Dict, Tuple
 
 class IndentDumper(yaml.Dumper):
     def increase_indent(self, flow=False, indentless=False):
@@ -108,6 +109,42 @@ class tt_netlist:
         self.unary_slice_op(tt_net_op_types.reduce, l_input, out_tens, op_dtype)
 
         self.dump_netlist()
+
+    def unary_tensor_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype, chip_ids: List[int]):
+        # make output tensor
+        out_tens = []
+        # TODO: need to convert to pyhsical chip_ids from logical chip ids
+        for target_device in chip_ids:
+            out_tens.append(tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape, dtype=op_dtype.dt, target_device=target_device))
+        self.unary_slice_bcast_op(tt_net_op_types.nop, l_input, out_tens, op_dtype, chip_ids)
+        self.dump_netlist()
+        return out_tens
+
+    def unary_slice_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, outputs: List[tt_tensor], op_dtype: tt_op_dtype, chip_ids: List[int]):
+        # flatten out the dimensions that will be iterated through for computation
+        l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
+
+        iterations = l_input_flat.shape[2]
+
+        op_name = op.name
+        queue_name = 'queue'
+        for slice in range(iterations):
+            # define input_queue
+            slice_input_queue_name = queue_name + "_" + str(slice) + "_" + str(self.next_netlist_idx) + "_lin"
+            rdim = l_input.address_tensor.shape[-2]
+            cdim = l_input.address_tensor.shape[-1]
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_input_queue_name, type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
+
+            # for each chip, define output_queue and and a nop to forward the data
+            for i, chip_id in enumerate(chip_ids):
+                output = outputs[i]
+                slice_op_name = op_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+                slice_output_queue_name = queue_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx) + "_out"
+                self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_output_queue_name, type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
+                rdim = output.address_tensor.shape[-2]
+                cdim = output.address_tensor.shape[-1]
+                self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_input_queue_name], in_df = [l_input.dtype], op_dtype = op_dtype, target_device=chip_id)
+                slice_input_queue_name = slice_op_name
 
     def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype):
         # make output tensor
@@ -303,9 +340,9 @@ class tt_netlist:
         if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             self.doc['queues'][name] = op_val_dict
         else:
-            self.graph_op_name = 'graph_op_' + str(slice_idx) + "_" + str(self.next_netlist_idx)
+            self.graph_op_name = 'graph_op_' + str(target_device) + "_" + str(slice_idx) + "_" + str(self.next_netlist_idx)
             self.doc['graphs'][self.graph_op_name] = {}
-            self.doc['graphs'][self.graph_op_name]['target_device'] = 0
+            self.doc['graphs'][self.graph_op_name]['target_device'] = target_device
             self.doc['graphs'][self.graph_op_name]['input_count'] = 1
             self.doc['graphs'][self.graph_op_name][name] = op_val_dict
 
