@@ -18,6 +18,11 @@ from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
 from IPython import embed
 from argparse import ArgumentParser
 
+def mean_absolute_fraction_error(exp, rec):
+    mae = torch.mean(torch.abs((exp - rec)))
+    return mae / torch.mean(torch.abs(exp))
+
+
 def test_matmul(target_arch):
     '''
     What does a test need?
@@ -32,7 +37,7 @@ def test_matmul(target_arch):
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
-    op_dtype = tt_op_dtype(dtype)
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 64
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
@@ -91,7 +96,7 @@ def test_matmul_gelu(target_arch):
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
-    op_dtype = tt_op_dtype(dtype)
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
@@ -149,7 +154,7 @@ def test_matmul_gelu_matmul(target_arch):
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
-    op_dtype = tt_op_dtype(dtype)
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
@@ -211,7 +216,7 @@ def test_attn(target_arch):
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
-    op_dtype = tt_op_dtype(dtype)
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128 # can't be bigger than dhead, can't be so small we require 16x16 cores
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
@@ -251,26 +256,71 @@ def test_attn(target_arch):
     tt_v_cpu = tt_v.from_device(0)
 
     for exp, rec in zip([q, k, v], [tt_q_cpu, tt_k_cpu, tt_v_cpu]):
-        mse = torch.mean((exp - rec)**2)
-        logging.info(f"Mean Squared Error: {mse}")
+        logging.info('MAFE: ', mean_absolute_fraction_error(exp, rec))
+
+
+    '''
+    Q * K.T attention scores
+    '''
+    # s, d -> nh, s, dm
+    q = q.reshape(s, nh, dh).permute(1,0,2)
+    k = k.reshape(s, nh, dh).permute(1,2,0)
+    scores = torch.matmul(q, k)
     
-    # exit()
+
+    # reshape in terms of blocks
+    tt_q = tt_q.reshape((1, 1, s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3)
+    print('tt_q shape after reshape:', tt_q.shape)
+    
+    tt_k = tt_k.reshape((1, 1, s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3).transpose()
+    print('tt_k shape after reshape:', tt_k.shape)
+
+    tt_scores = ttf.matmul(tt_q, tt_k, op_dtype=op_dtype, runtime=runtime)
+    print('tt_scores shape: ', tt_scores.shape)
+
+    tt_scores_cpu = tt_scores.from_device(0)
+    print('expected scores shape:', scores.size())
+    print(f'tt_scores shape:', tt_scores_cpu.size())
+    
+    logging.info(f"Scores MAFE: {mean_absolute_fraction_error(scores, tt_scores_cpu)*100:.3f}%")
+
+    # probabilities
+    probs = torch.nn.functional.softmax(scores, dim=-1)
+
+    tt_probs = ttf.softmax(tt_scores, dim=-1, op_dtype=op_dtype, runtime=runtime)
+    tt_probs = tt_probs.unsqueeze(-3)
+    tt_probs_cpu = tt_probs.from_device(0)
+    print('reduction:', tt_probs_cpu)
+    # logging.info(f'Probabilities MAFE: {mean_absolute_fraction_error(probs, tt_probs_cpu)*100:.3f}')
+
+    
+    be_api.finish_child_process()
+    backend.destroy()
 
 
-    # '''
-    # Q * K.T attention scores
-    # '''
-    # # s, d -> nh, s, dm
-    # q = q.reshape(s, nh, dh).permute(1,0,2)
-    # k = k.reshape(s, nh, dh).permute(1,2,0)
-    # scores = torch.matmul(q, k)
-    # print('expected scores shape:', scores.size())
+def test_reduce_max(target_arch):
+    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float32
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 128
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
-    # print('tt_k address tensor:')
-    # print(tt_k.address_tensor.size()) # torch.Size([1, 1, 1, 2, 8])
-    # # reshape in terms of blocks
-    # tt_scores = ttf.matmul(tt_q, tt_k, op_dtype=op_dtype, runtime=runtime, tms=[[{'hslice': [nh]}, 'tranpose'], [{'hslice': [nh]}]])
-    # print('tt_scores shape:', tt_scores.shape)
+    shape = (1, 1, 1, 5, block_size*8, block_size*4)
+    inp = torch.randn(shape)
+    exp, _ = torch.max(inp, dim=-1, keepdim=True)
+    print('expected size:', exp.size())
+    print(exp)
+
+    tt_inp = tt_tensor(block_size, simd, torch_tensor=inp, dtype=dtype)
+    tt_out = ttf.reduce_max(tt_inp, dim=-1, op_dtype=op_dtype, runtime=runtime)
+    tt_out_cpu = tt_out.from_device(0)
+    print(tt_out_cpu)
 
     be_api.finish_child_process()
     backend.destroy()
@@ -278,7 +328,8 @@ def test_attn(target_arch):
 def main(target_arch):
     # test_matmul_gelu_matmul(target_arch)
     # test_matmul(target_arch)
-    test_attn(target_arch)
+    # test_attn(target_arch)
+    test_reduce_max(target_arch)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
