@@ -229,22 +229,23 @@ def softmax(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, 
         out = multiply(expo, red_recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
 
-# def layer_norm(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
-#     if(runtime is None):
-#         out = functional.softmax(input, dim)
-#     else:
-#         reduce_fold_factors = list(fold_factors)
-#         reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
+def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(runtime is None):
+        out = functional.softmax(input, dim)
+    else:
+        reduce_fold_factors = list(fold_factors)
+        reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
 
-#         avg  = reduce(lin, dim, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-#         diff = subtract(lin, avg, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-#         sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-#         var = reduce(sqr, dim, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-#         sqrt = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-#         recip = reciprocal(sqrt, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-#         scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-#         out = scaled_diff
-#     return out
+        avg  = reduce(lin, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        diff = subtract(lin, avg, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        var = reduce(sqr, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        sqrt = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        recip = reciprocal(sqrt, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        g_scaled = multiply(scaled_diff, gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        out = add(g_scaled, beta, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    return out
 
 def gelu(input, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if runtime is None:
