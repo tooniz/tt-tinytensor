@@ -108,6 +108,7 @@ class tt_tensor():
         # write out all slices
         for slice in range(iterations):
             self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[0][0][slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+        return self
 
     def from_device(self, chip_id):
         assert self.torch_dtype is not None

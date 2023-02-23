@@ -111,7 +111,7 @@ def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dty
         row_fold = int(lin.shape[-2] / min_dim)
         col_fold = int(rin.shape[-1] / min_dim)
 
-        if(lin.shape[-2] < runtime.simd_cluster.r_cores and rin.shape[-1] < runtime.simd_cluster.c_cores):
+        if(lin.shape[-2] <= runtime.simd_cluster.r_cores and rin.shape[-1] <= runtime.simd_cluster.c_cores):
             row_fold = 1
             col_fold = 1
             lin_folded, rin_folded = bcast_inputs(lin,rin)
@@ -142,7 +142,7 @@ def tt_unary_elementwise_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_
         row_fold = int(lin.shape[-2] / min_dim)
         col_fold = int(lin.shape[-1] / min_dim)
 
-        if(lin.shape[-2] < runtime.simd_cluster.r_cores and lin.shape[-1] < runtime.simd_cluster.c_cores):
+        if(lin.shape[-2] <= runtime.simd_cluster.r_cores and lin.shape[-1] <= runtime.simd_cluster.c_cores):
             lin_folded = lin
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
@@ -199,6 +199,12 @@ def reciprocal(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fo
     else:
         return tt_unary_elementwise_op(tt_net_op_types.reciprocal, lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
+def sqrt(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(runtime is None):
+        return (1/lin)
+    else:
+        return tt_unary_elementwise_op(tt_net_op_types.sqrt, lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+
 def linear(acts, weights, bias, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):
         out = torch.functional.linear(acts,weights,bias)
@@ -230,21 +236,30 @@ def softmax(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, 
     return out
 
 def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
-    if(runtime is None):
-        out = functional.softmax(input, dim)
-    else:
-        reduce_fold_factors = list(fold_factors)
-        reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
+    assert runtime is not None, "Don't call tt_functional op without runtime"
 
-        avg  = reduce(lin, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-        diff = subtract(lin, avg, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-        sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-        var = reduce(sqr, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-        sqrt = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-        recip = reciprocal(sqrt, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-        scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-        g_scaled = multiply(scaled_diff, gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-        out = add(g_scaled, beta, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    import pdb
+    pdb.set_trace()
+    # MEAN
+    reduce_fold_factors = list(fold_factors)
+    reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
+    sumo = reduce(lin, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+    sumo = sumo.unsqueeze(-1)
+    numel = torch.fill(torch.empty((1,1,1,lin.block_size, lin.block_size)), 1/(lin.shape[-1]*lin.block_size)) # tensor filled w/ number of elements in reduce dim
+    tt_numel = tt_tensor(lin.block_size, runtime.simd_cluster, torch_tensor=numel, dtype=lin.dtype).to_device(0, numel)
+    avg = multiply(sumo, tt_numel, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    # VARIANCE
+    diff = subtract(lin, avg, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    var_unnormalized = reduce(sqr, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+    # TODO: divide by numel to compute variance
+    var = multiply(var_unnormalized, tt_numel, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    sqrto = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+    recip = reciprocal(sqrto, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+    recip = recip.unsqueeze(-1)
+    scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    g_scaled = multiply(scaled_diff, gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    out = add(g_scaled, beta, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
 
 def gelu(input, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
@@ -256,12 +271,6 @@ def gelu(input, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_f
 
 def relu(input, output=None):
     out = functional.relu(input)
-    if(output != None):
-        output.copy_(out)
-    return out
-
-def sqrt(input, output=None):
-    out = torch.sqrt(input, dim)
     if(output != None):
         output.copy_(out)
     return out

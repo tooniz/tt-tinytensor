@@ -186,8 +186,7 @@ def test_matmul_gelu_matmul(target_arch):
     out = tt_ff2_out.from_device(0)
 
     logging.info("Received output from device")
-    mse = torch.mean((out - golden)**2)
-    logging.info(f"Mean Squared Error: {mse}")
+    logging.info(f"MAFE: {mean_absolute_fraction_error(golden, out)}")
 
     logging.info(f'Expected: {golden}')
     logging.info(f'Recieved: {out}')
@@ -284,16 +283,108 @@ def test_attn(target_arch):
     
     logging.info(f"Scores MAFE: {mean_absolute_fraction_error(scores, tt_scores_cpu)*100:.3f}%")
 
-    # probabilities
     probs = torch.nn.functional.softmax(scores, dim=-1)
 
-    tt_probs = ttf.softmax(tt_scores, dim=-1, op_dtype=op_dtype, runtime=runtime)
-    tt_probs = tt_probs.unsqueeze(-3)
+    # # We don't yet have stable softmax because reduce_max not supported. Do it from pytorch for now.
+    scores_max = torch.max(tt_scores_cpu, dim=-1, keepdim=True)[0].expand(tt_scores_cpu.size()) # TODO: do on device
+    tt_scores_max = tt_tensor(block_size, simd, torch_tensor=scores_max, dtype=dtype).to_device(0, scores_max)
+    tt_scores_normed = ttf.subtract(tt_scores, tt_scores_max, op_dtype=op_dtype, runtime=runtime)
+
+    tt_probs = ttf.softmax(tt_scores_normed, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=(1,1,1))
     tt_probs_cpu = tt_probs.from_device(0)
     print('reduction:', tt_probs_cpu)
-    # logging.info(f'Probabilities MAFE: {mean_absolute_fraction_error(probs, tt_probs_cpu)*100:.3f}')
+    logging.info(f'Probabilities MAFE: {mean_absolute_fraction_error(probs, tt_probs_cpu):.3f}')
+
+
+    '''
+    probs * V
+    '''
+    v = v.reshape(s, nh, dh).permute(1,0,2)
+    attn_out = torch.matmul(probs, v)
+
+    tt_v = tt_v.reshape((1, 1, s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3)
+    tt_attn_out = ttf.matmul(tt_probs, tt_v, op_dtype=op_dtype, runtime=runtime)
+    tt_attn_out_cpu = tt_attn_out.from_device(0)
+
+    print('attn out expected:', attn_out.size(), attn_out)
+    print('attn out received:',tt_attn_out_cpu.size(), tt_attn_out_cpu)
+    print('attn out MAFE:', mean_absolute_fraction_error(attn_out, tt_attn_out_cpu))
 
     
+    be_api.finish_child_process()
+    backend.destroy()
+
+
+def test_softmax(target_arch):
+    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float32
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 128
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+
+    shape = (1, 1, 1, 5, block_size*8, block_size*4)
+    inp = torch.randn(shape)
+    exp = torch.nn.functional.softmax(inp, dim=-1)
+
+    tt_inp = tt_tensor(block_size, simd, torch_tensor=inp, dtype=dtype)
+    tt_inp.to_device(0, inp)
+    tt_out = ttf.softmax(tt_inp, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=(1,1,1))
+    tt_out_cpu = tt_out.from_device(0)
+
+    print('expected size:', exp.size())
+    print(exp)
+    print('received shape:', tt_out_cpu.shape)
+    print(tt_out_cpu)
+
+    print('MAFE:', mean_absolute_fraction_error(exp, tt_out_cpu))
+
+    be_api.finish_child_process()
+    backend.destroy()
+
+def test_layernorm(target_arch):
+    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float32
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 128
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+
+    # import pdb
+    # pdb.set_trace()
+    shape = (1, 1, 1, 5, block_size*8, block_size*4)
+    inp = torch.randn(shape)
+    normalized_shape = shape[-1]
+    gamma = torch.randn(normalized_shape)
+    beta = torch.randn(normalized_shape)
+    exp = torch.nn.functional.layer_norm(inp, gamma.size(), weight=gamma, bias=beta, eps=1e-05)
+
+    tt_inp = tt_tensor(block_size, simd, torch_tensor=inp, dtype=dtype).to_device(0, inp)
+    gamma_expand = gamma.expand(inp.size()) # I think we need to make this the same size as input for tt_functional
+    tt_gamma = tt_tensor(block_size, simd, torch_tensor=gamma_expand, dtype=dtype).to_device(0, gamma_expand)
+    beta_expand = beta.expand(inp.size())
+    tt_beta = tt_tensor(block_size, simd, torch_tensor=beta_expand, dtype=dtype).to_device(0, beta_expand)
+
+    tt_out = ttf.layer_norm(tt_inp, tt_beta, tt_gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=(1,1,1))
+    tt_out_cpu = tt_out.from_device(0)
+
+    print('expected size:', exp.size())
+    print(exp)
+    print('received shape:', tt_out_cpu.shape)
+    print(tt_out_cpu)
+
+    print('MAFE:', mean_absolute_fraction_error(exp, tt_out_cpu))
+
     be_api.finish_child_process()
     backend.destroy()
 
@@ -329,7 +420,8 @@ def main(target_arch):
     # test_matmul_gelu_matmul(target_arch)
     # test_matmul(target_arch)
     # test_attn(target_arch)
-    test_reduce_max(target_arch)
+    # test_softmax(target_arch)
+    test_layernorm(target_arch)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
