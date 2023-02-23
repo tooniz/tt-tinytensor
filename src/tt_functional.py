@@ -8,6 +8,35 @@ from tt_netlist import tt_netlist
 from tt_netlist import tt_net_op_types
 from eager_backend import BackendStatusCode
 
+def reduce_id(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None, fold_factors = None):
+    if(runtime == None):
+        out = torch.sum(input, dim)
+    else:
+        if(input.shape[dim] == 1):
+            out = input.squeeze(dim)
+        else:
+            # swap sum dimension and columns
+            tens = input.swapaxes(-1,dim)
+            ones_shape = list(tens.shape)
+            c = ones_shape.pop()
+            r = ones_shape.pop()
+            torch_ones_shape = ones_shape.copy()
+            ones_shape.append(c)
+            ones_shape.append(1)
+            torch_ones_shape.append(c*input.virtual_block_size)
+            torch_ones_shape.append(1*input.virtual_block_size)
+            ones = tt_tensor(block_size=input.virtual_block_size, simd_cluster=runtime.simd_cluster, shape=ones_shape, dtype=op_dtype.dt)
+            torch_zero_ones = reduce_ones(torch_ones_shape[-2],input.virtual_block_size)
+            torch_zero_ones = torch_zero_ones.broadcast_to(torch_ones_shape)
+            ones.to_device(0, torch_zero_ones)
+            out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, tens, ones, op_dtype)
+            status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+            assert status == BackendStatusCode.Success
+            runtime.backend.wait_for_idle()
+            out = out.swapaxes(-1,dim)
+            out = out.squeeze(dim)
+    return out
+
 def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None, fold_factors = None):
     if(runtime == None):
         out = torch.sum(input, dim)
@@ -17,7 +46,6 @@ def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None, f
         else:
             # swap sum dimension and columns
             tens = input.swapaxes(-1,dim)
-            # generated the ones tensor to reduce row-wise
             ones_shape = list(tens.shape)
             c = ones_shape.pop()
             r = ones_shape.pop()
@@ -29,10 +57,7 @@ def reduce(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None, f
             ones = tt_tensor(block_size=input.virtual_block_size, simd_cluster=runtime.simd_cluster, shape=ones_shape, dtype=op_dtype.dt)
             torch_ones = torch.ones(torch_ones_shape)
             ones.to_device(0, torch_ones)
-            out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, tens, ones, op_dtype)
-            status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
-            assert status == BackendStatusCode.Success
-            runtime.backend.wait_for_idle()
+            out = matmul(tens, ones, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
             out = out.swapaxes(-1,dim)
             out = out.squeeze(dim)
     return out
@@ -69,7 +94,7 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
 
     if(folded):
         if(id_fold != 1):
-            out = reduce(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
+            out = reduce_id(out, dim = -3, op_dtype = op_dtype, runtime=runtime)
         else:
             # squeeze out the reduction dimension, if its just a placeholder
             out = out.squeeze(dim=-3)
@@ -122,13 +147,11 @@ def tt_unary_elementwise_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
     else:
-        row_fold = fold_factors[0]
-        col_fold = fold_factors[1]
+        row_fold, col_fold, id_fold = fold_factors
         if((row_fold == 1) and (col_fold == 1)):
             lin_folded = lin
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
-
     out = runtime.netlist.unary_tensor_op(op, lin_folded, op_dtype)
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
@@ -188,13 +211,40 @@ def softmax(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, 
     if(runtime is None):
         out = functional.softmax(input, dim)
     else:
-        print("here")
+        #### Everything here is fairly straightforward except the fold factor gymnastics
+        # The reduce matmul has a fixed column width, so can't be folding columns there
+        # the reduced tensor going into reciprocal is one wide so can't be folding columns there
+        #
+        # For the exp() and multiply() can fold both rows and columns, the same way - that makes sense
+        # for the reduce matmul can fold rows (just like exp and multiply, makes sense)
+        # and can fold inner dimension - the only op that takes the inner dim folding argument is matmul
+        # again, makes sense
         expo = exp(lin=lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-        red  = reduce(expo, dim, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        reduce_fold_factors = list(fold_factors)
+        reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
+        red  = reduce(expo, dim, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
         red = red.unsqueeze(-1)
-        red_recip = reciprocal(red, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        red_recip = reciprocal(red, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
         print(expo.shape, red.shape, red_recip.shape, expo.dtype.name, red_recip.dtype.name)
         out = multiply(expo, red_recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+    return out
+
+def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(runtime is None):
+        out = functional.softmax(input, dim)
+    else:
+        reduce_fold_factors = list(fold_factors)
+        reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
+
+        avg  = reduce(lin, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        diff = subtract(lin, avg, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        var = reduce(sqr, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        sqrt = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        recip = reciprocal(sqrt, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
+        scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        g_scaled = multiply(scaled_diff, gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+        out = add(g_scaled, beta, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
 
 def gelu(input, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
@@ -219,6 +269,18 @@ def sqrt(input, output=None):
 
 ######
 # Helper functions
+def reduce_ones(r, block_size):
+    first_one_offset = 0
+    out_tensor = torch.zeros(r,block_size)
+    for col in range(block_size):
+        period_cntr = 0
+        for row in range(r):
+            if(row >= first_one_offset):
+                if(period_cntr % block_size == 0):
+                    out_tensor[row][col] = 1.0
+                period_cntr = period_cntr + 1
+        first_one_offset = first_one_offset + 1
+    return out_tensor
 
 def make_expand_mask(shape_list, dim, factor):
     expand_dim = shape_list[dim]
@@ -250,16 +312,13 @@ def fold_input(linput, rowfactor, colfactor):
 
 
 def fold_inputs(linput, rinput, rowfactor, colfactor):
-    assert linput.shape[-1] % colfactor == 0
-    assert linput.shape[-2] % rowfactor == 0
-    assert rinput.shape[-1] % colfactor == 0
-    assert rinput.shape[-2] % rowfactor == 0
     # expand to equal dimensions before folding
     lrshp, rrshp = bcast_inputs(linput,rinput)
-    # if(sum(list(linput.shape)) > sum(list(rinput.shape))):
-    #     rrshp = rinput.broadcast_to(linput.shape)
-    # elif(sum(list(rinput.shape)) > sum(list(linput.shape))):
-    #     lrshp = linput.broadcast_to(linput.shape)
+
+    assert lrshp.shape[-1] % colfactor == 0
+    assert lrshp.shape[-2] % rowfactor == 0
+    assert rrshp.shape[-1] % colfactor == 0
+    assert rrshp.shape[-2] % rowfactor == 0
 
     # figure out reshaped dims
     out_cols = int(lrshp.shape[-1] / colfactor)
@@ -405,13 +464,14 @@ def fold_inputs_for_mm(linput, rinput, rowfactor, colfactor, idfactor):
     # add the reshaped bottom dimensions
     l_shape.extend([rowfactor,out_rows,idfactor,out_id])
     r_shape.extend([idfactor,out_id,colfactor,out_cols])
+
     # reshape
     lrshp = lrshp.reshape(l_shape)
     rrshp = rrshp.reshape(r_shape)
     # swap axes to make r,c at bottom
-    lrshp = lrshp.swapaxes(-2,-3) # rowfactor,idfactor,out_rows,out_id
-    rrshp = rrshp.swapaxes(-2,-3) # 
-    rrshp = rrshp.swapaxes(-3,-4) # colfactor,idfactor,out_id,out_cols
+    lrshp = lrshp.swapaxes(-2,-3) # rowfactor,  idfactor, out_rows, out_id
+    rrshp = rrshp.swapaxes(-2,-3) # idfactor , colfactor, out_id  , out_cols 
+    rrshp = rrshp.swapaxes(-3,-4) # colfactor,  idfactor, out_id  , out_cols
     # add extra dims for broadcasting to each others shape
     lrshp = lrshp.unsqueeze(-4) # rowfactor,1,idfactor,out_rows,out_id
     rrshp = rrshp.unsqueeze(-5) # 1,colfactor,idfactor,out_id,out_cols
@@ -423,6 +483,7 @@ def unfold_output(input, rowfactor, colfactor):
     shape = list(input.shape)
     c = shape[-1]
     r = shape[-2]
+
     for _ in range(4):
         shape.pop()
     mc = c * colfactor

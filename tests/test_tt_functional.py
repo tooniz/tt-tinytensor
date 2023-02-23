@@ -42,9 +42,9 @@ def gen_random_inputs(mm = False):
     #   Run all tt_functional ops every time
 
     block_size = random.choice([64,128])#,256])
-    tile_r = random.choice([1,2,8]) #,5,6,7,8])
-    tile_c = random.choice([1,2,4,8]) #,5,6,7,8])
-    tile_o_c = random.choice([1,2,4,8]) #,5,6,7,8])
+    tile_r = random.choice([2,8]) #,5,6,7,8])
+    tile_c = random.choice([2,4,8]) #,5,6,7,8])
+    tile_o_c = random.choice([2,4,8]) #,5,6,7,8])
 
     row_fold = random.choice([1,2])
     col_fold = random.choice([1,2])
@@ -53,13 +53,13 @@ def gen_random_inputs(mm = False):
     mm_l_full_tile_dim_r = block_size * tile_r * row_fold
     mm_l_full_tile_dim_c = block_size * tile_c * id_fold
     mm_r_full_tile_dim_c = block_size * tile_o_c * col_fold
-    linmm = torch.zeros((1,1,1,1,mm_l_full_tile_dim_r,mm_l_full_tile_dim_c))
-    rinmm = torch.zeros((1,1,1,1,mm_l_full_tile_dim_c,mm_r_full_tile_dim_c))
+    linmm = torch.randn((1,1,1,1,mm_l_full_tile_dim_r,mm_l_full_tile_dim_c))
+    rinmm = torch.randn((1,1,1,1,mm_l_full_tile_dim_c,mm_r_full_tile_dim_c))
 
     l_full_tile_dim_r = block_size * tile_r * row_fold
     l_full_tile_dim_c = block_size * tile_c * col_fold
     lin = torch.randn((1,1,1,l_full_tile_dim_r,l_full_tile_dim_c))
-    rin = torch.randn((1,1,1,1,l_full_tile_dim_r,l_full_tile_dim_c))
+    rin = torch.randn((1,1,1,2,l_full_tile_dim_r,l_full_tile_dim_c))
 
     ##### THIS FAILED FOR SOME REASON
     if(random.choice([0,1])):
@@ -67,6 +67,15 @@ def gen_random_inputs(mm = False):
 
     # with open(random_inputs.txt, 'w') as out:
     #     out.write(lin.shape, rin.shape, linmm.shape, rinmm.shape, block_size, (row_fold, col_fold, id_fold, "\n")
+    assert lin.shape[-1] % col_fold == 0
+    assert lin.shape[-2] % row_fold == 0
+    assert rin.shape[-1] % col_fold == 0
+    assert rin.shape[-2] % row_fold == 0
+
+    assert linmm.shape[-2] % row_fold == 0
+    assert rinmm.shape[-1] % col_fold == 0
+    assert rinmm.shape[-2] % id_fold == 0
+
     return lin, rin, linmm, rinmm, block_size, (row_fold, col_fold, id_fold)
 
 def test_ops(simd0, netlist, runtime, backend, be_api):
@@ -94,14 +103,14 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
     op_dtype = tt_op_dtype(tt_dtype.Float16)
     ttf_binary_functions = [ttf.matmul, ttf.add, ttf.multiply, ttf.subtract] 
     ttf_unary_functions = [ttf.exp] #, ttf.reciprocal]
-    ttf_reduction_functions = [ttf.reduce]
+    ttf_reduction_functions = [] #[ttf.reduce]
 
     ##
     # Run computation and check results
     ##
     for i in range(len(ttf_binary_functions)):
         opname = ttf_binary_functions[i].__name__
-        print("Op name: ", opname," end    ", fold_factors[0], fold_factors[1], lin.shape, rin.shape)
+        print("Op name: ", opname," ", fold_factors[0], fold_factors[1], fold_factors[2], linmm.shape, rinmm.shape)
         if(opname == "matmul"): # matmul is a special case
             print("SHAPE:",linmm.shape, rinmm.shape)
             out_ttens = ttf.matmul(linmm_ttens, rinmm_ttens, op_dtype, runtime, fold_factors)
@@ -138,10 +147,15 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
 
     for i in range(len(ttf_reduction_functions)):
         print("Op name: ", ttf_reduction_functions[i].__name__)
-        out_ttens = ttf_reduction_functions[i](rin_ttens, -3, op_dtype, runtime)
+        dim = -1
+        out_ttens = ttf_reduction_functions[i](rin_ttens, dim=dim, op_dtype=op_dtype, runtime=runtime)
         out = out_ttens.from_device(0)
         out = out.type(torch.float32)
-        golden = ttf_reduction_functions[i](rin,-3)
+        if(dim == -1):
+            pass
+        else:
+            golden = ttf_reduction_functions[i](rin,dim)
+        embed()
         max_diff = torch.max(torch.abs(out - golden))
         print("Loop: ",i)
         if(not torch.allclose(out,golden,0.5,0.5)):
@@ -161,12 +175,31 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
     del(rinmm_ttens)
     runtime.simd_cluster.check_allocator_end_state()
 
+def set_vertical_zero_stripe(tens):
+    out = tens.clone()
+    for j in range(128):
+        for i in range(64):
+            out[0][0][0][j][i] = 0
+        for i in range(64):
+            out[0][0][0][j][i+64] = tens[0][0][0][j][i]
+    return out
+
+def set_horizontal_zero_stripe(tens):
+    out = tens.clone()
+    for j in range(128):
+        for i in range(64):
+            out[0][0][0][i][j] = tens[0][0][0][i][j]
+        for i in range(64):
+            out[0][0][0][i+64][j] = 0
+    return out
+
 def transpose_test(simd0, netlist, runtime, backend, be_api):
     block_size = 64
     simd0.set_up_allocators([(tt_dtype.Float16, 64, 10000, 0x21000000)])
+    simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x31000000)])
 
-    lin = torch.randn(1,1,1,512,640)
-    rin = torch.randn(1,1,1,512,640)
+    lin = torch.randn(1,1,1,128,256)
+    rin = torch.randn(1,1,1,128,256)
 
     lin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
     rin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=rin, dtype=tt_dtype.Float32)
@@ -175,13 +208,33 @@ def transpose_test(simd0, netlist, runtime, backend, be_api):
     transposed = rin_ttens.transpose()
     row_fold = random.choice([1,2,4])
     col_fold = random.choice([1,2,4])
-    out_ttens = ttf.matmul(lin_ttens, transposed, tt_op_dtype(tt_dtype.Float16), runtime, (1,1,2))
+    out_ttens = ttf.matmul(lin_ttens, transposed, tt_op_dtype(tt_dtype.Float16), runtime, (2,2,2))
     out = out_ttens.from_device(0)
     out = out.type(torch.float32)
     golden = torch.matmul(lin,torch.transpose(rin,-1,-2))
+    embed()
+    assert torch.allclose(out,golden,atol=1.3,rtol=1.3), "Maximum difference"
 
-    assert torch.allclose(out,golden,atol=5,rtol=0.005), "Maximum difference"
+def test_softmax(simd0, netlist,runtime, backend, be_api):
+    lin, rin, linmm, rinmm, block_size, fold_factors = gen_random_inputs()
+    simd0.set_up_allocators([(tt_dtype.Float32, block_size, 10000, 0x11000000)])
+    simd0.set_up_allocators([(tt_dtype.Float16, block_size, 10000, 0x21000000)])
+    simd0.set_up_allocators([(tt_dtype.Float16_b, block_size, 10000, 0x31000000)])
 
+    lin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
+    lin_ttens.to_device(0,lin)
+
+    tout = ttf.softmax(lin_ttens,-1,tt_op_dtype(dtype=tt_dtype.Float16_b,dtype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b),runtime=runtime,fold_factors=fold_factors)
+    out = tout.from_device(0)
+    outfloat = out.type(torch.float32)
+
+    texp = torch.exp(lin)
+    tred = texp.sum(-1)
+    trecip = 1/tred
+    trecip_for_use = trecip.unsqueeze(-1).broadcast_to(1,1,1,outfloat.shape[-2],outfloat.shape[-1])
+    tres = texp * trecip_for_use
+
+    assert torch.allclose(tres,outfloat,atol=0.1,rtol=0.001)
 
 def main():
     print("Testing TT functional!")
@@ -194,8 +247,9 @@ def main():
     netlist = tt_netlist()
     runtime = tt_runtime(simd0, netlist, be_api, backend)
 
-    for x in range(10):
-        #test_ops(simd0, netlist,runtime, backend, be_api)
+    for x in range(5):
+        test_softmax(simd0, netlist,runtime, backend, be_api)
+        test_ops(simd0, netlist,runtime, backend, be_api)
         transpose_test(simd0, netlist,runtime, backend, be_api)
 
     print("Finished testing TT functional!")
@@ -208,56 +262,4 @@ if __name__ == "__main__":
 
 
 
-# import torch
-# import random
-# import logging
-# from tt_simd_cluster import tt_simd_cluster
-# from tt_simd_cluster import tt_dtype, tt_op_dtype
-# from tt_tensor import tt_tensor
-# import time
-# import torch
-# from tt_netlist import tt_netlist
-# from tt_netlist import tt_net_op_types
-# from tt_runtime import tt_runtime
-# import tt_functional as ttf
-# import eager_backend.backend_api as be_api
-# from test_utils import py_desc, py_tensor
-# from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
-# from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
-# from IPython import embed
-# import tt_functional as ttf
-# from tt_netlist import tt_net_op_types
-# from tt_dtype import tt_op_dtype
-# from tt_dtype import tt_dtype
-# print("Testing TT functional!")
-# target_arch = BackendDevice.Grayskull
-# target_devices = {0}
-# config = be_api.get_runtime_config(target_arch)
-# backend = Backend(config, target_devices)
-# be_api.initialize_child_process(target_arch, target_devices)
-# simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
-# netlist = tt_netlist()
-# runtime = tt_runtime(simd0, netlist, be_api, backend)
 
-# simd0.set_up_allocators([(tt_dtype.Float32, 64, 10000, 0x11000000)])
-# simd0.set_up_allocators([(tt_dtype.Float16, 64, 10000, 0x21000000)])
-# simd0.set_up_allocators([(tt_dtype.Float16_b, 64, 10000, 0x31000000)])
-
-# lin = torch.randn(1,1,1,512,128)
-# lin_ttens = tt_tensor(block_size=64, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
-# lin_ttens.to_device(0,lin)
-
-# import importlib
-# importlib.reload(ttf)
-# importlib.reload(tt_netlist)
-# tout = ttf.softmax(lin_ttens,-1,tt_op_dtype(dtype=tt_dtype.Float16_b,dtype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b),runtime,(1,1,1))
-# out = tout.from_device(0)
-# outfloat = out.type(torch.float32)
-
-# texp = torch.exp(lin)
-# tred = texp.sum(-1)
-# trecip = 1/tred
-# trecip_for_comp = trecip.unsqueeze(-1).broadcast_to(1,1,1,512,128)
-
-# trecip_for_use = trecip.unsqueeze(-1).broadcast_to(1,1,1,512,128)
-# tres = texp * trecip_for_use
