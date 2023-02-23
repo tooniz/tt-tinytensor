@@ -162,6 +162,41 @@ def tt_unary_elementwise_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_
 
     return out
 
+def tt_reduce_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(fold_factors is None):
+        # assume minimum dimension fits into both cores and max amount of dram queues
+        # for now...
+        min_dim = min(lin.shape[-2], lin.shape[-1])
+        row_fold = int(lin.shape[-2] / min_dim)
+        col_fold = int(lin.shape[-1] / min_dim)
+
+        if(lin.shape[-2] <= runtime.simd_cluster.r_cores and lin.shape[-1] <= runtime.simd_cluster.c_cores):
+            lin_folded = lin
+        else:
+            lin_folded = fold_input(lin, row_fold, col_fold)
+    else:
+        row_fold, col_fold, id_fold = fold_factors
+        if((row_fold == 1) and (col_fold == 1)):
+            lin_folded = lin
+        else:
+            lin_folded = fold_input(lin, row_fold, col_fold)
+
+    assert col_fold == 1
+    out = runtime.netlist.reduce_tensor_op(op, lin_folded, op_dtype)
+    status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
+    assert status == BackendStatusCode.Success
+    runtime.backend.wait_for_idle()
+
+    if((row_fold != 1) or (col_fold != 1)):
+        out = unfold_output(out,rowfactor=row_fold,colfactor=col_fold)
+
+    return out
+
+def reduce_max(lin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
+    if(runtime is None):
+        return torch.max(lin,dim=-1)
+    else:
+        return tt_reduce_op(tt_net_op_types.reduce, lin, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
 
 def matmul(lin, rin, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     if(runtime is None):

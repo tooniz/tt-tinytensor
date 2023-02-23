@@ -24,6 +24,7 @@ class tt_net_op_types(Enum):
     exp = 12
     gelu = 13
     sqrt = 14
+    reduce = 15
 
 
 class tt_netlist:
@@ -96,6 +97,17 @@ class tt_netlist:
             cdim = output.address_tensor.shape[-1]
 
             self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin'], in_df = [l_input.dtype], op_dtype = op_dtype)
+
+    def reduce_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype):
+        lshape = list(l_input.shape)
+        lshape.pop()
+        lshape.append(1)
+
+        out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=tuple(lshape), dtype=op_dtype.dt)
+
+        self.unary_slice_op(tt_net_op_types.reduce, l_input, out_tens, op_dtype)
+
+        self.dump_netlist()
 
     def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype):
         # make output tensor
@@ -253,7 +265,14 @@ class tt_netlist:
             attributes = True
             attributes_dict['m_k'] = m_k
             attributes_dict['u_kt'] = u_kt
-        
+
+        if(type == tt_net_op_types.reduce):
+            attributes = True
+            attributes_dict['dim'] = 'c'
+            attributes_dict['type'] = 'max'
+            attributes_dict['m_k'] = m_k
+            attributes_dict['u_kt'] = u_kt
+
         # Assemble attributes dictionary, if there are any
         if(bias == 'true'):
             attributes = True
