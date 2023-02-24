@@ -45,7 +45,7 @@ def test_broadcast(target_arch):
     output = tt_tensor(block_size=block_size, simd_cluster=simd, shape=output_shape_blocked, dtype=dtype)
 
     logging.info("Running ttf.broadcast")
-    # returns a list of tt_tensors on each chip
+
     ttf.broadcast(tt_A, output, op_dtype=op_dtype, runtime=runtime)
 
     logging.info("Ran ttf.broadcast Getting tensors from device")
