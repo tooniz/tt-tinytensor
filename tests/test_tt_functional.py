@@ -19,7 +19,12 @@ import tt_functional as ttf
 from tt_netlist import tt_net_op_types
 from tt_dtype import tt_op_dtype
 from tt_dtype import tt_dtype
+import os
 
+def cond_embed():
+    if os.getenv('CI_RUNNER'):
+        return
+    embed()
 
 def gen_random_inputs(mm = False):
     # Want small inputs, large inputs that fit onto a chip, big inputs that need folding along
@@ -128,7 +133,7 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
         print("Loop: ",i)
         if(not torch.allclose(out,golden,0.5,0.5)):
             print("Op name: ", ttf_binary_functions[i].__name__)
-            embed()
+            cond_embed()
         assert torch.allclose(out,golden,0.5,0.5), "Maximum diffeerence (%d)" % max_diff
 
     for i in range(len(ttf_unary_functions)):
@@ -141,7 +146,7 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
         print("Loop: ",i)
         if(not torch.allclose(out,golden,0.5,0.5)):
             print("Op name: ", ttf_unary_functions[i].__name__)
-            embed()
+            cond_embed()
         assert torch.allclose(out,golden,0.5,0.5), "Maximum diffeerence (%d)" % max_diff
         del(out_ttens)
 
@@ -155,12 +160,12 @@ def test_ops(simd0, netlist, runtime, backend, be_api):
             pass
         else:
             golden = ttf_reduction_functions[i](rin,dim)
-        embed()
+        cond_embed()
         max_diff = torch.max(torch.abs(out - golden))
         print("Loop: ",i)
         if(not torch.allclose(out,golden,0.5,0.5)):
             print("Op name: ", ttf_reduction_functions[i].__name__)
-            embed()
+            cond_embed()
         assert torch.allclose(out,golden,0.5,0.5), "Maximum difference (%d)" % max_diff
         del(out_ttens)
 
@@ -246,7 +251,8 @@ def main():
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api=be_api, netlist=netlist)
     runtime = tt_runtime(simd0, netlist, be_api, backend)
 
-    for x in range(5):
+    loops = 1 if os.getenv('CI_RUNNER') else 5
+    for x in range(loops):
         test_softmax(simd0, netlist,runtime, backend, be_api)
         test_ops(simd0, netlist,runtime, backend, be_api)
         transpose_test(simd0, netlist,runtime, backend, be_api)

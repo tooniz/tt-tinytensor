@@ -5,7 +5,7 @@ from tt_dtype import tt_dtype
 from tt_dtype import tt_op_dtype
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 class tt_tensor(): 
     id = 0
     def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, addr_tensor = None, dtype=tt_dtype.Float16, parent_tensor=None):
