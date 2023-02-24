@@ -71,10 +71,10 @@ class tt_netlist:
 
     def unary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
         # flatten out the dimensions that will be iterated through for computation
-        l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
-        output_flat = output.address_tensor.flatten(start_dim=2,end_dim=-3)
+        l_input_flat = l_input.address_tensor.flatten(start_dim=0,end_dim=-3)
+        output_flat = output.address_tensor.flatten(start_dim=0,end_dim=-3)
 
-        iterations = l_input_flat.shape[2]
+        iterations = l_input_flat.shape[0]
 
         op_name = op.name
         queue_name = 'queue'
@@ -112,9 +112,9 @@ class tt_netlist:
 
     def unary_slice_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
         # flatten out the dimensions that will be iterated through for computation
-        l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
+        l_input_flat = l_input.address_tensor.flatten(start_dim=0,end_dim=-3)
 
-        iterations = l_input_flat.shape[2]
+        iterations = l_input_flat.shape[0]
 
         op_name = op.name
         queue_name = 'queue'
@@ -170,11 +170,11 @@ class tt_netlist:
 
     def binary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
         # flatten out the dimensions that will be iterated through for computation
-        l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
-        r_input_flat = r_input.address_tensor.flatten(start_dim=2,end_dim=-3)
-        output_flat = output.address_tensor.flatten(start_dim=2,end_dim=-3)
+        l_input_flat = l_input.address_tensor.flatten(start_dim=0,end_dim=-3)
+        r_input_flat = r_input.address_tensor.flatten(start_dim=0,end_dim=-3)
+        output_flat = output.address_tensor.flatten(start_dim=0,end_dim=-3)
 
-        iterations = l_input_flat.shape[2]
+        iterations = l_input_flat.shape[0]
 
         op_name = op.name
         queue_name = 'queue'

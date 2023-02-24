@@ -339,14 +339,6 @@ def reduce_ones(r, block_size):
         first_one_offset = first_one_offset + 1
     return out_tensor
 
-def make_expand_mask(shape_list, dim, factor):
-    expand_dim = shape_list[dim]
-    out_list = shape_list
-    for i in range(len(shape_list)):
-        out_list[i] = -1
-    out_list[dim] = expand_dim * factor
-    return out_list
-
 def fold_input(linput, rowfactor, colfactor):
     assert linput.shape[-1] % colfactor == 0
     assert linput.shape[-2] % rowfactor == 0
@@ -426,12 +418,7 @@ def bcast_inputs(lin, rin):
         dim = dim_l
     expand_mask_l = []
     expand_mask_r = []
-    # do not touch chip dims
-    expand_mask_l.append(-1)
-    expand_mask_l.append(-1)
-    expand_mask_r.append(-1)
-    expand_mask_r.append(-1)
-    for i in range(2, dim): # do not touch chip dims
+    for i in range(0, dim): # do not touch chip dims
         if(lin.shape[i] > rin.shape[i]):
             assert lin.shape[i] % rin.shape[i] == 0
             expand_mask_r.append(int(lin.shape[i]/rin.shape[i]))
@@ -455,8 +442,8 @@ def bcast_inputs(lin, rin):
 # do not mess with bottom two dimensions
 # for everything else - use method of non-matmuls
 def bcast_inputs_mm(lin, rin):
-    assert len(lin.shape) >= 4
-    assert len(rin.shape) >= 4
+    assert len(lin.shape) >= 2
+    assert len(rin.shape) >= 2
     assert lin.shape[-1] == rin.shape[-2]
     dim_l = len(lin.shape)
     dim_r = len(rin.shape)
@@ -464,23 +451,19 @@ def bcast_inputs_mm(lin, rin):
         dim_diff = dim_l - dim_r
         dim = dim_l
         for _ in range(dim_diff):
-            rin = rin.unsqueeze(dim=2)
+            rin = rin.unsqueeze(dim=0)
     elif(dim_r > dim_l):
         dim_diff = dim_r - dim_l
         dim = dim_r
         for _ in range(dim_diff):
-            lin = lin.unsqueeze(dim=2)
+            lin = lin.unsqueeze(dim=0)
     else:
         dim = dim_l
     assert len(lin.shape) == len(rin.shape)
     expand_mask_l = []
     expand_mask_r = []
-    # do not touch chip dims
-    expand_mask_l.append(-1)
-    expand_mask_l.append(-1)
-    expand_mask_r.append(-1)
-    expand_mask_r.append(-1)
-    for i in range(2, dim-2): # do not touch chip dims OR row/col
+
+    for i in range(0, dim-2): # do not touch row/col dims
         if(lin.shape[i] > rin.shape[i]):
             assert lin.shape[i] % rin.shape[i] == 0
             expand_mask_r.append(int(lin.shape[i]/rin.shape[i]))

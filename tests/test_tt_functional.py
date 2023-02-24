@@ -212,7 +212,6 @@ def transpose_test(simd0, netlist, runtime, backend, be_api):
     out = out_ttens.from_device(0)
     out = out.type(torch.float32)
     golden = torch.matmul(lin,torch.transpose(rin,-1,-2))
-    embed()
     assert torch.allclose(out,golden,atol=1.3,rtol=1.3), "Maximum difference"
 
 def test_softmax(simd0, netlist,runtime, backend, be_api):

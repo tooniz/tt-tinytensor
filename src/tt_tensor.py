@@ -82,24 +82,24 @@ class tt_tensor():
         if(self.transpose_r_c):
             # transpose the lower dims into untransposed form
             # this is since the netlist/backend will do the actual transpose via a different mechanism
-            flat_addr_tensor = self.address_tensor.swapaxes(-1,-2).flatten(start_dim=2,end_dim=-3)
+            flat_addr_tensor = self.address_tensor.swapaxes(-1,-2).flatten(start_dim=0,end_dim=-3)
         else:
-            flat_addr_tensor = self.address_tensor.flatten(start_dim=2,end_dim=-3)
+            flat_addr_tensor = self.address_tensor.flatten(start_dim=0,end_dim=-3)
         # bit_mask = torch.full(flat_addr_tensor[0,0,tensor_slice].shape,7,dtype=torch.int64)
         # channel = torch.bitwise_and(flat_addr_tensor[0,0,tensor_slice], bit_mask)
         # shift = torch.full((1,),3,dtype = torch.int64)
         # addr = torch.bitwise_right_shift(flat_addr_tensor[0,0,tensor_slice], shift)
         # list_a = channel.flatten().tolist()
         # list_b = addr.flatten().tolist()
-        list_b = flat_addr_tensor[0,0,tensor_slice].flatten().tolist()
+        list_b = flat_addr_tensor[tensor_slice].flatten().tolist()
         list_a = self.get_dram_chan_tensor_slice(tensor_slice).flatten().tolist()
         assert len(list_a) == len(list_b)
         return list(map(list, zip(list_a, list_b)))
 
     def get_dram_addr_tensor_slice(self, slice: int):
         # just return the indices for initial test
-        addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3)
-        return addr_tensor_flat[0][0][slice].contiguous()
+        addr_tensor_flat = self.address_tensor.flatten(start_dim=0,end_dim=-3)
+        return addr_tensor_flat[slice].contiguous()
 
     def get_dram_chan_tensor_slice(self, slice: int):
         # put everything in channel one for initial test
@@ -139,12 +139,12 @@ class tt_tensor():
         torch_in_dt = torch_in.type(self.torch_dtype)
 
         # Generate flat view of tensor dims except for chip dims and 2D slices
-        torch_in_flat = torch_in_dt.flatten(start_dim=2,end_dim=-3)
-        iterations = torch_in_flat.shape[2]
+        torch_in_flat = torch_in_dt.flatten(start_dim=0,end_dim=-3)
+        iterations = torch_in_flat.shape[0]
 
         # write out all slices
         for slice in range(iterations):
-            self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[0][0][slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+            self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
         return self
 
     # reads from all devices tensor maps onto
@@ -180,8 +180,8 @@ class tt_tensor():
         assert self.torch_dtype is not None
 
         # Generate flat view of tensor dims except for chip dims and 2D slices
-        addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3).contiguous()
-        iterations = addr_tensor_flat.shape[2]
+        addr_tensor_flat = self.address_tensor.flatten(start_dim=0,end_dim=-3).contiguous()
+        iterations = addr_tensor_flat.shape[0]
 
         # create read target tensor
         tensor_shape = list(self.address_tensor.shape)
@@ -191,11 +191,11 @@ class tt_tensor():
         read_tensor.type(self.torch_dtype)
 
         # flat view of read target tensor
-        read_tensor_flat = read_tensor.flatten(start_dim=2,end_dim=-3)
+        read_tensor_flat = read_tensor.flatten(start_dim=0,end_dim=-3)
         read_tensor_flat = read_tensor_flat.type(self.torch_dtype)
         # read back all slices
         for slice in range(iterations):
-            read_tensor_flat[0][0][slice] = self.unblock_tensor_slice(self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice),torch_dtype=self.torch_dtype),block_dim=self.block_size)
+            read_tensor_flat[slice] = self.unblock_tensor_slice(self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice),torch_dtype=self.torch_dtype),block_dim=self.block_size)
         return read_tensor_flat
 
     def block_tensor_slice(self, tensor, block_dim = 128, ublock_dim = 64, tile_dim = 32, face_dim = 16):
