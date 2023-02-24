@@ -1,6 +1,6 @@
 import torch
 from tt_malloc import tt_malloc
-from tt_simd_cluster import tt_simd_cluster
+from tt_simd_cluster import tt_simd_cluster, tt_dram_chan_picker
 from tt_dtype import tt_dtype
 import logging
 
@@ -68,6 +68,16 @@ class tt_tensor():
             logging.debug(log_string)
             self.simd_cluster.deallocate_tensor(self)
 
+    def get_dram_chan(self, block_id):
+        if (self.simd_cluster.chan_picker == tt_dram_chan_picker.distributed):
+            uniq_hash = hash(f"{self.id}_{block_id}")
+            return uniq_hash % self.simd_cluster.num_dram_channels()
+        elif (self.simd_cluster.chan_picker == tt_dram_chan_picker.roundrobin):
+            return block_id % self.simd_cluster.num_dram_channels()
+        elif (self.simd_cluster.chan_picker == tt_dram_chan_picker.constant):
+            return 1
+        return -1
+
     def get_dram_list(self, tensor_slice):
         if(self.transpose_r_c):
             # transpose the lower dims into untransposed form
@@ -82,7 +92,8 @@ class tt_tensor():
         # list_a = channel.flatten().tolist()
         # list_b = addr.flatten().tolist()
         list_b = flat_addr_tensor[0,0,tensor_slice].flatten().tolist()
-        list_a = [1] * len(list_b)
+        list_a = self.get_dram_chan_tensor_slice(tensor_slice).flatten().tolist()
+        assert len(list_a) == len(list_b)
         return list(map(list, zip(list_a, list_b)))
 
     def get_dram_addr_tensor_slice(self, slice: int):
@@ -92,7 +103,12 @@ class tt_tensor():
 
     def get_dram_chan_tensor_slice(self, slice: int):
         # put everything in channel one for initial test
-        chan_tens = torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
+        chan_tens = torch.zeros((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
+        # iterate over all elements in chan_tens and assign it by element id
+        for r in range(chan_tens.shape[0]):
+            for c in range(chan_tens.shape[1]):
+                block_id = r * chan_tens.shape[1] + c
+                chan_tens[r][c] = self.get_dram_chan(block_id)
         return chan_tens
 
     # sends to all devices that the tensor maps onto

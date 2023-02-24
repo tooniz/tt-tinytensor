@@ -12,6 +12,11 @@ from test_utils import py_desc, py_tensor
 from eager_backend import DataFormat, BackendType, BackendDevice, BackendStatusCode, IOType, IOLocation
 from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
 
+class tt_dram_chan_picker(Enum):
+    constant = 0
+    roundrobin = 1
+    distributed = 2
+
 class tt_dram_accessor():
     def __init__(self, be_api):
         self.be_api = be_api
@@ -49,6 +54,16 @@ class tt_simd_cluster():
         self.allocators = {}
         self.be_api = be_api
         self.arch = arch
+
+        if (self.arch == BackendDevice.Grayskull):
+            self.chan_picker = tt_dram_chan_picker.roundrobin
+        else:
+            # wh a0 enforces dram buffers to be on the same chan for scatter, Sean has a fix WIP
+            self.chan_picker = tt_dram_chan_picker.constant
+
+        # force constant channel for now
+        self.chan_picker = tt_dram_chan_picker.constant
+
         #self.netlist_api = tt_netlist
         if(be_api is not None):
             self.dram_accessor = tt_dram_accessor(be_api)
@@ -84,6 +99,15 @@ class tt_simd_cluster():
             self.allocators[(tensor.block_size,tensor.dtype)].deallocate_tensor(tensor.address_tensor)
         else:
             logging.exception("Trying to de-allocate dram without having properly configured allocator for a given block, data type")
+            assert False
+
+    def num_dram_channels(self):
+        if (self.arch == BackendDevice.Grayskull):
+            return 8
+        elif (self.arch == BackendDevice.Wormhole or self.arch == BackendDevice.Wormhole_B0):
+            return 6
+        else:
+            logging.exception(f"Unsupported architecture {self.arch}")
             assert False
 
     def check_allocator_end_state(self):

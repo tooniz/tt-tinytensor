@@ -36,7 +36,7 @@ def test_matmul(target_arch):
     be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
-    dtype = tt_dtype.Float32
+    dtype = tt_dtype.Float16
     op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 64
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
