@@ -39,24 +39,27 @@ def test_broadcast(target_arch):
     tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
 
     logging.info("Pushing data to device RAM")
-    tt_A.to_device(tt_A.target_device, A)
+    tt_A.to_device(tt_A.target_devices[0], A)
+
+    output = tt_tensor(block_size=block_size, simd_cluster=simd, shape=tt_A.shape, dtype=dtype, target_devices=[0,1])
 
     logging.info("Running ttf.broadcast")
     # returns a list of tt_tensors on each chip
-    tt_outs = ttf.broadcast(tt_A, chip_ids=[0,1], op_dtype=op_dtype, runtime=runtime)
+    ttf.broadcast(tt_A, output, chip_ids=[0,1], op_dtype=op_dtype, runtime=runtime)
 
     logging.info("Ran ttf.broadcast Getting tensors from device")
 
     outs = []
-    for tt_out in tt_outs:
-        outs.append(tt_out.from_device(tt_out.target_device))
-        logging.info(f"Received output from device {tt_out.target_device}")
+    for target_device in output.target_devices:
+        outs.append(output.from_device(target_device))
+        logging.info(f"Received output from device {target_device}")
 
     # destroy bbe before checking errors, otherwise runtime does not clean up and next test hangs
     be_api.finish_child_process()
     backend.destroy()
 
-    for out in outs:
+    for i, out in enumerate(outs):
+        print(f"out[{i}]={out}")
         assert torch.allclose(out, A, atol=1e-03, rtol=1e-02)
     print('Test passed: SUCCESS')
 

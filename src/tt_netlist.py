@@ -110,17 +110,12 @@ class tt_netlist:
 
         self.dump_netlist()
 
-    def unary_tensor_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype, chip_ids: List[int]):
-        # make output tensor
-        out_tens = []
-        # TODO: need to convert to pyhsical chip_ids from logical chip ids
-        for target_device in chip_ids:
-            out_tens.append(tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape, dtype=op_dtype.dt, target_device=target_device))
-        self.unary_slice_bcast_op(tt_net_op_types.nop, l_input, out_tens, op_dtype, chip_ids)
+    def unary_tensor_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_ids: List[int]):
+        # # TODO: need to convert to pyhsical chip_ids from logical chip ids
+        self.unary_slice_bcast_op(tt_net_op_types.nop, l_input, output, op_dtype, chip_ids)
         self.dump_netlist()
-        return out_tens
 
-    def unary_slice_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, outputs: List[tt_tensor], op_dtype: tt_op_dtype, chip_ids: List[int]):
+    def unary_slice_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_ids: List[int]):
         # flatten out the dimensions that will be iterated through for computation
         l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
 
@@ -137,7 +132,6 @@ class tt_netlist:
 
             # for each chip, define output_queue and and a nop to forward the data
             for i, chip_id in enumerate(chip_ids):
-                output = outputs[i]
                 slice_op_name = op_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx)
                 slice_output_queue_name = queue_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx) + "_out"
                 self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_output_queue_name, type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
