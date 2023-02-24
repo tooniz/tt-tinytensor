@@ -287,7 +287,7 @@ def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runti
     assert runtime is not None, "Don't call tt_functional op without runtime"
 
     import pdb
-    pdb.set_trace()
+    #pdb.set_trace()
     # MEAN
     reduce_fold_factors = list(fold_factors)
     reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
