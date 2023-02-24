@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 class tt_tensor(): 
     id = 0
-    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Float16, parent_tensor=None, target_devices = [0]):
+    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Float16, parent_tensor=None):
         self.id = tt_tensor.id
         tt_tensor.id = tt_tensor.id + 1
         # save local references for block size, the dram allocator and chip grid
@@ -18,7 +18,6 @@ class tt_tensor():
         # Initialize virtual block size and set 'transpose lowest two dimensions' flag to False
         self.virtual_block_size = block_size
         self.transpose_r_c = False
-        self.target_devices = target_devices
         # handle setting of torch.dtype (for to_device() and from_device())
         if(dtype == tt_dtype.Float32):
             self.torch_dtype = torch.float32
@@ -57,8 +56,7 @@ class tt_tensor():
                 list_shape[-1] = int(list_shape[-1] * block_size)
                 list_shape[-2] = int(list_shape[-2] * block_size)
                 zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
-                for target_device in target_devices:
-                    self.to_device(target_device,zeros)
+                self.to_devices(torch_in=zeros)
 
     def __del__(self):
         # once tt_tensor goes out of scope
@@ -97,6 +95,27 @@ class tt_tensor():
         chan_tens = torch.ones((self.address_tensor.shape[-2], self.address_tensor.shape[-1]),dtype=torch.int32)
         return chan_tens
 
+    # sends to all devices that the tensor maps onto
+    def to_devices(self, torch_in: torch.Tensor):
+        assert self.torch_dtype is not None
+
+        # convert input tensor to expected input data type
+        torch_in_dt = torch_in.type(self.torch_dtype)
+
+        # Generate flat view of tensor dims except for chip dims and 2D slices
+        torch_in_flat = torch_in_dt.flatten(start_dim=2,end_dim=-3)
+        iterations = torch_in_flat.shape[2]
+        dim_chip_r = torch_in_flat.shape[0]
+        dim_chip_c = torch_in_flat.shape[1]
+
+        # write out all slices
+        for slice in range(iterations):
+            for chip_r in range(dim_chip_r):
+                for chip_c in range(dim_chip_c):
+                    # TODO: convert logical ids to physical ids
+                    chip_id = chip_r * dim_chip_r + chip_c
+                    self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[chip_r][chip_c][slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+
     def to_device(self, chip_id: int, torch_in: torch.Tensor):
         assert self.torch_dtype is not None
 
@@ -111,6 +130,35 @@ class tt_tensor():
         for slice in range(iterations):
             self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[0][0][slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
         return self
+
+    # reads from all devices tensor maps onto
+    def from_devices(self):
+        assert self.torch_dtype is not None
+
+        # Generate flat view of tensor dims except for chip dims and 2D slices
+        addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3).contiguous()
+        iterations = addr_tensor_flat.shape[2]
+        dim_chip_r = addr_tensor_flat.shape[0]
+        dim_chip_c = addr_tensor_flat.shape[1]
+
+        # create read target tensor
+        tensor_shape = list(self.address_tensor.shape)
+        tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
+        tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
+        read_tensor = torch.empty(tensor_shape).contiguous()
+        read_tensor.type(self.torch_dtype)
+
+        # flat view of read target tensor
+        read_tensor_flat = read_tensor.flatten(start_dim=2,end_dim=-3)
+        read_tensor_flat = read_tensor_flat.type(self.torch_dtype)
+        # read back all slices
+        for slice in range(iterations):
+            for chip_r in range(dim_chip_r):
+                for chip_c in range(dim_chip_c):
+                    # TODO: convert logical ids to physical ids
+                    chip_id = chip_r * dim_chip_r + chip_c
+                    read_tensor_flat[chip_r][chip_c][slice] = self.unblock_tensor_slice(self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice),torch_dtype=self.torch_dtype),block_dim=self.block_size)
+        return read_tensor_flat
 
     def from_device(self, chip_id):
         assert self.torch_dtype is not None

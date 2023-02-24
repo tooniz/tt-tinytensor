@@ -39,28 +39,30 @@ def test_broadcast(target_arch):
     tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
 
     logging.info("Pushing data to device RAM")
-    tt_A.to_device(tt_A.target_devices[0], A)
+    tt_A.to_devices(A)
 
-    output = tt_tensor(block_size=block_size, simd_cluster=simd, shape=tt_A.shape, dtype=dtype, target_devices=[0,1])
+    output_shape_blocked = (1, 2, 1, 256 // block_size, 256 // block_size)
+    output = tt_tensor(block_size=block_size, simd_cluster=simd, shape=output_shape_blocked, dtype=dtype)
 
     logging.info("Running ttf.broadcast")
     # returns a list of tt_tensors on each chip
-    ttf.broadcast(tt_A, output, chip_ids=[0,1], op_dtype=op_dtype, runtime=runtime)
+    ttf.broadcast(tt_A, output, op_dtype=op_dtype, runtime=runtime)
 
     logging.info("Ran ttf.broadcast Getting tensors from device")
 
-    outs = []
-    for target_device in output.target_devices:
-        outs.append(output.from_device(target_device))
-        logging.info(f"Received output from device {target_device}")
+    out = output.from_devices()
+    logging.info(f"Received output from devices {output.shape[0]}x{output.shape[1]}")
 
     # destroy bbe before checking errors, otherwise runtime does not clean up and next test hangs
     be_api.finish_child_process()
     backend.destroy()
 
-    for i, out in enumerate(outs):
-        print(f"out[{i}]={out}")
-        assert torch.allclose(out, A, atol=1e-03, rtol=1e-02)
+    # compare the output from each chip
+    for chip_r in range(output_shape_blocked[0]):
+        for chip_c in range(output_shape_blocked[1]):
+            device_out = out[chip_r][chip_c][:][:][:]
+            print(f"device_out[{chip_r}][{chip_c}]={device_out}")
+            assert torch.allclose(device_out, A, atol=1e-03, rtol=1e-02)
     print('Test passed: SUCCESS')
 
 def main(target_arch):

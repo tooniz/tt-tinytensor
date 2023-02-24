@@ -110,12 +110,12 @@ class tt_netlist:
 
         self.dump_netlist()
 
-    def unary_tensor_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_ids: List[int]):
+    def unary_tensor_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
         # # TODO: need to convert to pyhsical chip_ids from logical chip ids
-        self.unary_slice_bcast_op(tt_net_op_types.nop, l_input, output, op_dtype, chip_ids)
+        self.unary_slice_bcast_op(tt_net_op_types.nop, l_input, output, op_dtype)
         self.dump_netlist()
 
-    def unary_slice_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_ids: List[int]):
+    def unary_slice_bcast_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
         # flatten out the dimensions that will be iterated through for computation
         l_input_flat = l_input.address_tensor.flatten(start_dim=2,end_dim=-3)
 
@@ -130,15 +130,21 @@ class tt_netlist:
             cdim = l_input.address_tensor.shape[-1]
             self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_input_queue_name, type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
 
+            # TODO: convert logical ids to physical ids
+            dim_chip_r = output.shape[0]
+            dim_chip_c = output.shape[1]
             # for each chip, define output_queue and and a nop to forward the data
-            for i, chip_id in enumerate(chip_ids):
-                slice_op_name = op_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx)
-                slice_output_queue_name = queue_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx) + "_out"
-                self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_output_queue_name, type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
-                rdim = output.address_tensor.shape[-2]
-                cdim = output.address_tensor.shape[-1]
-                self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_input_queue_name], in_df = [l_input.dtype], op_dtype = op_dtype, target_device=chip_id)
-                slice_input_queue_name = slice_op_name
+            for chip_r in range(dim_chip_r):
+                for chip_c in range(dim_chip_c):
+                    # TODO: convert logical ids to physical ids
+                    chip_id = chip_r * dim_chip_r + chip_c
+                    slice_op_name = op_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx)
+                    slice_output_queue_name = queue_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx) + "_out"
+                    self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_output_queue_name, type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
+                    rdim = output.address_tensor.shape[-2]
+                    cdim = output.address_tensor.shape[-1]
+                    self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_input_queue_name], in_df = [l_input.dtype], op_dtype = op_dtype, target_device=chip_id)
+                    slice_input_queue_name = slice_op_name
 
     def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype):
         # make output tensor
