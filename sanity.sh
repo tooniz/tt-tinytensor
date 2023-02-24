@@ -11,13 +11,13 @@ runner="python3"
 
 # -------------------------------------------------------------------
 # EDIT LISTS TO ADD NEW TESTS
+# repeat the same random test if multiple loops are desired
 # -------------------------------------------------------------------
-
 gs_tests=(
     # "test_tt_tensor.py"
-    "test_tt_functional.py" # random test loop 1
-    "test_tt_functional.py" # random test loop 2
-    "test_tt_functional.py" # random test loop 3
+    "test_tt_functional.py"
+    "test_tt_functional.py"
+    "test_tt_functional.py"
 )
 wh_tests=(
     # "test_tt_tensor.py"
@@ -28,7 +28,6 @@ wh_tests=(
 # -------------------------------------------------------------------
 # MAIN RUNNER
 # -------------------------------------------------------------------
-
 if [ "$device" == "gs" ]; then
     tests=("${gs_tests[@]}")
 elif [ "$device" == "wh" ]; then
@@ -55,9 +54,8 @@ for test in "${tests[@]}"; do
       status=$FAIL
       result=1
     fi
-    fflush()
-    ((tid=tid+1))
+    ((tid++))
 done
 
-printf "\n\nAll tests completed $status"
+printf "\nAll tests completed $status"
 exit $result

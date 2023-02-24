@@ -14,8 +14,9 @@ from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
 
 class tt_dram_chan_picker(Enum):
     constant = 0
-    roundrobin = 1
-    distributed = 2
+    distributed = 1
+    roundrobin_block = 2
+    roundrobin_tensor = 3
 
 class tt_dram_accessor():
     def __init__(self, be_api):
@@ -57,13 +58,10 @@ class tt_simd_cluster():
         self.netlist = netlist
 
         if (self.arch == BackendDevice.Grayskull):
-            self.chan_picker = tt_dram_chan_picker.roundrobin
+            self.chan_picker = tt_dram_chan_picker.distributed
         else:
             # wh a0 enforces dram buffers to be on the same chan for scatter, Sean has a fix WIP
-            self.chan_picker = tt_dram_chan_picker.constant
-
-        # force constant channel for now
-        self.chan_picker = tt_dram_chan_picker.constant
+            self.chan_picker = tt_dram_chan_picker.roundrobin_tensor
 
         #self.netlist_api = tt_netlist
         if(be_api is not None):
