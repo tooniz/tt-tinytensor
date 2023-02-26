@@ -44,7 +44,7 @@ class tt_dram_accessor():
         return out
 
 class tt_simd_cluster():
-    def __init__(self, r: int, c: int, ids: tuple, be_api = None, arch=BackendDevice.Grayskull):
+    def __init__(self, r: int, c: int, ids: tuple, be_api = None, netlist=None, arch=BackendDevice.Grayskull):
         self.r = r
         self.c = c
         self.r_cores = 10
@@ -54,6 +54,7 @@ class tt_simd_cluster():
         self.allocators = {}
         self.be_api = be_api
         self.arch = arch
+        self.netlist = netlist
 
         if (self.arch == BackendDevice.Grayskull):
             self.chan_picker = tt_dram_chan_picker.roundrobin
@@ -68,14 +69,9 @@ class tt_simd_cluster():
         if(be_api is not None):
             self.dram_accessor = tt_dram_accessor(be_api)
 
-    def compile_netlist(self):
-        pass
-
-    def run_netlist(self):
-        pass
-
-    def __del__(self):
-        pass
+    def get_chip_id(self, r: int, c: int):
+        id = r * self.c + c
+        return id
 
     def write_tensor_slice_to_dram(self, chip_id, data, chan, address):
         self.dram_accessor.write_tensor_slice(chip_id=chip_id, data=data, chan=chan, addr=address)

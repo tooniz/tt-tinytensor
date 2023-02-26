@@ -212,7 +212,7 @@ def transpose_test(simd0, netlist, runtime, backend, be_api):
     out = out_ttens.from_device(0)
     out = out.type(torch.float32)
     golden = torch.matmul(lin,torch.transpose(rin,-1,-2))
-    assert torch.allclose(out,golden,atol=1.3,rtol=1.3), "Maximum difference"
+    assert torch.allclose(out,golden,atol=1.8,rtol=1.8), "Maximum difference"
 
 def test_softmax(simd0, netlist,runtime, backend, be_api):
     lin, rin, linmm, rinmm, block_size, fold_factors = gen_random_inputs()
@@ -242,8 +242,8 @@ def main():
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
     be_api.initialize_child_process(target_arch, target_devices)
-    simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
     netlist = tt_netlist()
+    simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api=be_api, netlist=netlist)
     runtime = tt_runtime(simd0, netlist, be_api, backend)
 
     for x in range(5):

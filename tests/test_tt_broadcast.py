@@ -39,18 +39,23 @@ def test_broadcast(target_arch):
     tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
 
     logging.info("Pushing data to device RAM")
-    tt_A.to_devices(A)
+
+    # Change to use to_device, it should technically work. We should debug together tomorrow if not
+    tt_A.to_device(A)
 
     output_shape_blocked = (1, 2, 1, 256 // block_size, 256 // block_size)
     output = tt_tensor(block_size=block_size, simd_cluster=simd, shape=output_shape_blocked, dtype=dtype)
 
     logging.info("Running ttf.broadcast")
 
-    ttf.broadcast(tt_A, output, op_dtype=op_dtype, runtime=runtime)
+    ttf.broadcast(tt_A, output, runtime=runtime)
 
     logging.info("Ran ttf.broadcast Getting tensors from device")
 
-    out = output.from_devices()
+    # Change to work like this
+    out = output.unshard()
+    out = output.from_device()
+
     logging.info(f"Received output from devices {output.shape[0]}x{output.shape[1]}")
 
     # destroy bbe before checking errors, otherwise runtime does not clean up and next test hangs

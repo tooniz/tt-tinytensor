@@ -2,12 +2,13 @@ import torch
 from tt_malloc import tt_malloc
 from tt_simd_cluster import tt_simd_cluster, tt_dram_chan_picker
 from tt_dtype import tt_dtype
+from tt_dtype import tt_op_dtype
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
 class tt_tensor(): 
     id = 0
-    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, dtype=tt_dtype.Float16, parent_tensor=None):
+    def __init__(self, block_size: int, simd_cluster: tt_simd_cluster, torch_tensor: torch.Tensor = None, shape: tuple = None, addr_tensor = None, dtype=tt_dtype.Float16, parent_tensor=None):
         self.id = tt_tensor.id
         tt_tensor.id = tt_tensor.id + 1
         # save local references for block size, the dram allocator and chip grid
@@ -43,9 +44,13 @@ class tt_tensor():
         # initialize empty tensor with the right shape
         self.address_tensor = torch.empty(self.shape)
 
+
+        if(addr_tensor != None):
+            self.address_tensor = addr_tensor
+
         # allocate memory if you are not a 'view' of an existing tensor
         # and if the back end API 
-        if(parent_tensor == None):
+        if(parent_tensor == None and addr_tensor == None):
             # Call the allocator to get the new tensor filled with allocated DRAM addresses
             self.address_tensor = simd_cluster.allocate_tensor(self)
 
@@ -56,7 +61,8 @@ class tt_tensor():
                 list_shape[-1] = int(list_shape[-1] * block_size)
                 list_shape[-2] = int(list_shape[-2] * block_size)
                 zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
-                self.to_devices(torch_in=zeros)
+                self.to_device(0, torch_in=zeros)
+
 
     def __del__(self):
         # once tt_tensor goes out of scope
@@ -111,26 +117,27 @@ class tt_tensor():
                 chan_tens[r][c] = self.get_dram_chan(block_id)
         return chan_tens
 
+    # Obsolete to_devices()
     # sends to all devices that the tensor maps onto
-    def to_devices(self, torch_in: torch.Tensor):
-        assert self.torch_dtype is not None
+    # def to_devices(self, torch_in: torch.Tensor):
+    #     assert self.torch_dtype is not None
 
-        # convert input tensor to expected input data type
-        torch_in_dt = torch_in.type(self.torch_dtype)
+    #     # convert input tensor to expected input data type
+    #     torch_in_dt = torch_in.type(self.torch_dtype)
 
-        # Generate flat view of tensor dims except for chip dims and 2D slices
-        torch_in_flat = torch_in_dt.flatten(start_dim=2,end_dim=-3)
-        iterations = torch_in_flat.shape[2]
-        dim_chip_r = torch_in_flat.shape[0]
-        dim_chip_c = torch_in_flat.shape[1]
+    #     # Generate flat view of tensor dims except for chip dims and 2D slices
+    #     torch_in_flat = torch_in_dt.flatten(start_dim=0,end_dim=-3)
+    #     iterations = torch_in_flat.shape[0]
+    #     dim_chip_r = self.simd_cluster.r
+    #     dim_chip_c = self.simd_cluster.c
 
-        # write out all slices
-        for slice in range(iterations):
-            for chip_r in range(dim_chip_r):
-                for chip_c in range(dim_chip_c):
-                    # TODO: convert logical ids to physical ids
-                    chip_id = chip_r * dim_chip_r + chip_c
-                    self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[chip_r][chip_c][slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+    #     # write out all slices
+    #     for slice in range(iterations):
+    #         for chip_r in range(dim_chip_r):
+    #             for chip_c in range(dim_chip_c):
+    #                 # TODO: convert logical ids to physical ids
+    #                 chip_id = self.simd_cluster.get_chip_id(chip_r, chip_c)
+    #                 self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
 
     def to_device(self, chip_id: int, torch_in: torch.Tensor):
         assert self.torch_dtype is not None
@@ -145,36 +152,43 @@ class tt_tensor():
         # write out all slices
         for slice in range(iterations):
             self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+
+        # broadcast the tensor to all chips via netlist
+        if(self.simd_cluster.r != 1 or self.simd_cluster.c != 1):
+            self.simd_cluster.netlist.unary_tensor_bcast_op(self, self, 0)
+
         return self
 
-    # reads from all devices tensor maps onto
-    def from_devices(self):
-        assert self.torch_dtype is not None
+    # Obsolete from_devices()
+    #
+    # # reads from all devices tensor maps onto
+    # def from_devices(self):
+    #     assert self.torch_dtype is not None
 
-        # Generate flat view of tensor dims except for chip dims and 2D slices
-        addr_tensor_flat = self.address_tensor.flatten(start_dim=2,end_dim=-3).contiguous()
-        iterations = addr_tensor_flat.shape[2]
-        dim_chip_r = addr_tensor_flat.shape[0]
-        dim_chip_c = addr_tensor_flat.shape[1]
+    #     # Generate flat view of tensor dims except for chip dims and 2D slices
+    #     addr_tensor_flat = self.address_tensor.flatten(start_dim=0,end_dim=-3).contiguous()
+    #     iterations = addr_tensor_flat.shape[0]
+    #     dim_chip_r = self.simd_cluster.r
+    #     dim_chip_c = self.simd_cluster.c
 
-        # create read target tensor
-        tensor_shape = list(self.address_tensor.shape)
-        tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
-        tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
-        read_tensor = torch.empty(tensor_shape).contiguous()
-        read_tensor.type(self.torch_dtype)
+    #     # create read target tensor
+    #     tensor_shape = list(self.address_tensor.shape)
+    #     tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
+    #     tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
+    #     read_tensor = torch.empty(tensor_shape).contiguous()
+    #     read_tensor.type(self.torch_dtype)
 
-        # flat view of read target tensor
-        read_tensor_flat = read_tensor.flatten(start_dim=2,end_dim=-3)
-        read_tensor_flat = read_tensor_flat.type(self.torch_dtype)
-        # read back all slices
-        for slice in range(iterations):
-            for chip_r in range(dim_chip_r):
-                for chip_c in range(dim_chip_c):
-                    # TODO: convert logical ids to physical ids
-                    chip_id = chip_r * dim_chip_r + chip_c
-                    read_tensor_flat[chip_r][chip_c][slice] = self.unblock_tensor_slice(self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice),torch_dtype=self.torch_dtype),block_dim=self.block_size)
-        return read_tensor_flat
+    #     # flat view of read target tensor
+    #     read_tensor_flat = read_tensor.flatten(start_dim=2,end_dim=-3)
+    #     read_tensor_flat = read_tensor_flat.type(self.torch_dtype)
+    #     # read back all slices
+    #     for slice in range(iterations):
+    #         for chip_r in range(dim_chip_r):
+    #             for chip_c in range(dim_chip_c):
+    #                 # TODO: convert logical ids to physical ids
+    #                 chip_id = chip_r * dim_chip_r + chip_c
+    #                 read_tensor_flat[chip_r][chip_c][slice] = self.unblock_tensor_slice(self.simd_cluster.read_tensor_slice_from_dram(chip_id, read_tensor_flat[0][0][slice], self.get_dram_chan_tensor_slice(slice), self.get_dram_addr_tensor_slice(slice),torch_dtype=self.torch_dtype),block_dim=self.block_size)
+    #     return read_tensor_flat
 
     def from_device(self, chip_id):
         assert self.torch_dtype is not None
@@ -310,12 +324,69 @@ class tt_tensor():
         new_tensor.transpose_r_c = not new_tensor.transpose_r_c
         return new_tensor
 
-
     def stride(self):
         return self.address_tensor.stride()
 
-    def split(self):
-        pass
 
+    def calculate_shard_shape_and_stride(self, input_shape, input_shape_with_chips, input_strides, original_shape, original_strides, split_dim, split_chips):
+        # only accept negative number dimension representation
+        # 
+        assert split_dim <= 0 
+
+        new_shape = input_shape
+        new_shape_with_chips = input_shape_with_chips
+        new_strides = input_strides
+        unsqueezed_old_strides = [original_shape[0] * original_strides[0]] + original_strides
+
+        new_shape[split_dim] = int(self.shape[split_dim] / split_chips)
+        new_shape_with_chips[split_dim] = int(self.shape[split_dim] / split_chips)
+        new_shape_with_chips.insert(0, split_chips)
+        new_strides.insert(0, int((unsqueezed_old_strides[split_dim-1]) / split_chips))
+
+        return new_shape, new_shape_with_chips, new_strides
+
+    def shard(self, rsplit_dim, csplit_dim):
+        new_shape, new_shape_with_chips, new_strides = self.calculate_shard_shape_and_stride(list(self.shape), list(self.shape), list(self.address_tensor.stride()), list(self.shape), list(self.address_tensor.stride()), csplit_dim, self.simd_cluster.c)
+        new_shape, new_shape_with_chips, new_strides = self.calculate_shard_shape_and_stride(new_shape, new_shape_with_chips, new_strides, list(self.shape), list(self.address_tensor.stride()), rsplit_dim, self.simd_cluster.r)
+
+        # Make properly reshaped address tensor
+        reshaped_address_tensor = self.address_tensor.as_strided(size=new_shape_with_chips,stride=new_strides)
+
+        # Make new tensor
+        sharded_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=new_shape, dtype=self.dtype)
+
+        # Issue copy commands to fill new tensor from reshaped old one
+        for r in range(reshaped_address_tensor.shape[0]):
+            for c in range(reshaped_address_tensor.shape[1]):
+                chip_id = self.simd_cluster.get_chip_id(r,c)
+                self.simd_cluster.netlist.unary_copy_op(tt_tensor(addr_tensor=reshaped_address_tensor[r][c], shape=new_shape, simd_cluster=self.simd_cluster, block_size=self.block_size, dtype=self.dtype, parent_tensor=self), sharded_tensor, chip_id)
+        return sharded_tensor
+
+    def unshard(self, rsplit_dim, csplit_dim):
+        # only accept negative format dimension index
+        assert rsplit_dim <= 0 or rsplit_dim == None
+        assert csplit_dim <= 0 or csplit_dim == None
+        assert csplit_dim != None or rsplit_dim != None
+
+        # Figure out new tensor shape and strides
+        unsharded_shape = list(self.shape)
+        unsharded_shape[rsplit_dim] = int(self.shape[rsplit_dim] * self.simd_cluster.c)
+        unsharded_shape[csplit_dim] = int(self.shape[csplit_dim] * self.simd_cluster.r)
+
+        # Make new tensor
+        unsharded_tensor = tt_tensor(simd_cluster=self.simd_cluster, block_size=self.block_size, shape=unsharded_shape, dtype=self.dtype)
+
+        # Make properly reshaped address tensor for receiving shard back into
+        new_shape, new_shape_with_chips, new_strides = self.calculate_shard_shape_and_stride(list(self.shape), list(self.shape), list(self.address_tensor.stride()), list(self.shape), list(self.address_tensor.stride()), csplit_dim, self.simd_cluster.c)
+        new_shape, new_shape_with_chips, new_strides = self.calculate_shard_shape_and_stride(new_shape, new_shape_with_chips, new_strides, list(self.shape), list(self.address_tensor.stride()), rsplit_dim, self.simd_cluster.r)
+        reshaped_address_tensor = self.address_tensor.as_strided(size=new_shape_with_chips,stride=new_strides)
+
+        # Broadcast the shard to the right address on each chip
+        for r in range(reshaped_address_tensor.shape[0]):
+            for c in range(reshaped_address_tensor.shape[1]):
+                src_chip = self.simd_cluster.get_chip_id(r,c)
+                self.simd_cluster.netlist.unary_tensor_bcast_op(self, tt_tensor(addr_tensor=reshaped_address_tensor[r][c], shape=unsharded_shape, simd_cluster=self.simd_cluster, block_size=unsharded_tensor.block_size, dtype=unsharded_tensor.dtype, parent_tensor=unsharded_tensor), src_chip)
+
+        return unsharded_tensor
 
 
