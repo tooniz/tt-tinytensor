@@ -29,7 +29,7 @@ def test_matmul(target_arch):
     tt_simd_cluster w/ allocators set up
     '''
     # Why is the user creating all of these?
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -42,8 +42,8 @@ def test_matmul(target_arch):
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
     dims = 64, 512, 512
-    shape0 = (1, 1, 1, dims[0], dims[1])
-    shape1 = (1, 1, 1, dims[1], dims[2])
+    shape0 = (1, dims[0], dims[1])
+    shape1 = (1, dims[1], dims[2])
     A = torch.randn(shape0)
     B = torch.randn(shape1)
     golden = torch.matmul(A, B)
@@ -88,11 +88,11 @@ def test_matmul_gelu(target_arch):
     tt_simd_cluster w/ allocators set up
     '''
     # Why is the user creating all of these?
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices, "./cluster_desc.yaml") # Why is user launching child process?
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -100,7 +100,7 @@ def test_matmul_gelu(target_arch):
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
-    shape = (1, 1, 1, 1024, 1024)
+    shape = (1, 1024, 1024)
     A = torch.randn(shape)
     B = torch.randn(shape)
     golden = torch.nn.functional.gelu(torch.matmul(A, B))
@@ -146,7 +146,7 @@ def test_matmul_gelu_matmul(target_arch):
     tt_simd_cluster w/ allocators set up
     '''
     # Why is the user creating all of these?
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -158,7 +158,7 @@ def test_matmul_gelu_matmul(target_arch):
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
-    shape = (1, 1, 1, 1024, 1024)
+    shape = (1, 1024, 1024)
     A = torch.randn(shape)
     B = torch.randn(shape)
     C = torch.randn(shape)
@@ -207,7 +207,7 @@ def test_attn(target_arch):
     '''
     Functional attention module to test on WH
     '''
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -224,8 +224,8 @@ def test_attn(target_arch):
     '''
 
     s, dm, dh, nh = 256, 1024, 1024//4, 4
-    x = torch.randn(1, 1, 1, s, dm)
-    Wq, Wv, Wk = (torch.randn(1, 1, 1, dm, dm) for _ in range(3))
+    x = torch.randn(1, s, dm)
+    Wq, Wv, Wk = (torch.randn(1, dm, dm) for _ in range(3))
     q = torch.matmul(x, Wq) # Ignore bias and weight tranposing
     k = torch.matmul(x, Wk)
     v = torch.matmul(x, Wv)
@@ -268,10 +268,10 @@ def test_attn(target_arch):
     
 
     # reshape in terms of blocks
-    tt_q = tt_q.reshape((1, 1, s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3)
+    tt_q = tt_q.reshape((s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3)
     print('tt_q shape after reshape:', tt_q.shape)
     
-    tt_k = tt_k.reshape((1, 1, s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3).transpose()
+    tt_k = tt_k.reshape((s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3).transpose()
     print('tt_k shape after reshape:', tt_k.shape)
 
     tt_scores = ttf.matmul(tt_q, tt_k, op_dtype=op_dtype, runtime=runtime)
@@ -302,7 +302,7 @@ def test_attn(target_arch):
     v = v.reshape(s, nh, dh).permute(1,0,2)
     attn_out = torch.matmul(probs, v)
 
-    tt_v = tt_v.reshape((1, 1, s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3)
+    tt_v = tt_v.reshape((s//block_size, nh, dm//block_size//nh)).swapaxes(-2, -3)
     tt_attn_out = ttf.matmul(tt_probs, tt_v, op_dtype=op_dtype, runtime=runtime)
     tt_attn_out_cpu = tt_attn_out.from_device(0)
 
@@ -316,7 +316,7 @@ def test_attn(target_arch):
 
 
 def test_softmax(target_arch):
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -328,7 +328,7 @@ def test_softmax(target_arch):
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
 
-    shape = (1, 1, 1, 5, block_size*8, block_size*4)
+    shape = (1, 5, block_size*8, block_size*4)
     inp = torch.randn(shape)
     exp = torch.nn.functional.softmax(inp, dim=-1)
 
@@ -348,7 +348,7 @@ def test_softmax(target_arch):
     backend.destroy()
 
 def test_layernorm(target_arch):
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -362,7 +362,7 @@ def test_layernorm(target_arch):
 
     # import pdb
     # pdb.set_trace()
-    shape = (1, 1, 1, 5, block_size*8, block_size*4)
+    shape = (1, 5, block_size*8, block_size*4)
     inp = torch.randn(shape)
     normalized_shape = shape[-1]
     gamma = torch.randn(normalized_shape)
@@ -417,13 +417,15 @@ def test_reduce_max(target_arch):
     backend.destroy()
 
 def main(target_arch):
-    # test_matmul_gelu_matmul(target_arch)
     # test_matmul(target_arch)
+    # test_matmul_gelu(target_arch)
+    # test_matmul_gelu_matmul(target_arch)
     # test_attn(target_arch)
     # test_softmax(target_arch)
     test_layernorm(target_arch)
 
 if __name__ == '__main__':
+    logging.basicConfig(level="INFO")
     parser = ArgumentParser()
     parser.add_argument('--device', '-d', help='Device: {wh, gs}', default='wh')
     args = parser.parse_args()
