@@ -121,7 +121,10 @@ class tt_netlist:
                     chip_id = l_input.simd_cluster.get_chip_id(chip_r,chip_c)
                     slice_op_name = op_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx)
                     slice_output_queue_name = queue_name + "_" + str(chip_id) + "_" + str(slice) + "_" + str(self.next_netlist_idx) + "_out"
-                    self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_output_queue_name, type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
+
+                    # if copying the input tensor onto itself, skip the src_chip output queue, data is already there
+                    if l_input != output or chip_id != src_chip_id:
+                        self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_output_queue_name, type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
                     rdim = output.address_tensor.shape[-2]
                     cdim = output.address_tensor.shape[-1]
                     self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_input_queue_name], in_df = [l_input.dtype], op_dtype = op_dtype, target_device=chip_id)
@@ -202,6 +205,13 @@ class tt_netlist:
             cdim = output.address_tensor.shape[-1]
 
             self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype, lin_transpose=l_input.transpose_r_c, rin_transpose=r_input.transpose_r_c)
+
+    # this will be needed when some chips do not have ops on them
+    def add_empty_graph(self, slice_idx: int, target_device: int = 0):
+            self.graph_op_name = 'graph_op_' + str(target_device) + "_" + str(slice_idx) + "_" + str(self.next_netlist_idx)
+            self.doc['graphs'][self.graph_op_name] = {}
+            self.doc['graphs'][self.graph_op_name]['target_device'] = target_device
+            self.doc['graphs'][self.graph_op_name]['input_count'] = 1
 
     def add_op(self, slice_idx: int, lin_tensor: tt_tensor, name: str, type: tt_net_op_types, \
             block_size: int, \

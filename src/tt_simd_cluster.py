@@ -21,6 +21,16 @@ class tt_dram_chan_picker(Enum):
 class tt_dram_accessor():
     def __init__(self, be_api):
         self.be_api = be_api
+
+    # just initialize rdptr/wrptr for the ram, no data copy
+    def init_tensor_slice(self,chip_id,chan,addr):
+        weight = {
+            'chan': chan,
+            'addr': addr,
+            'loc': IOLocation.Dram
+        }
+        self.be_api.init_queue(weight['loc'], chip_id, py_desc(weight['chan']), py_desc(weight['addr']), 1)
+
     def write_tensor_slice(self,chip_id,data,chan,addr):
         weight = {
             'data': data,
@@ -45,17 +55,18 @@ class tt_dram_accessor():
         return out
 
 class tt_simd_cluster():
-    def __init__(self, r: int, c: int, ids: tuple, be_api = None, netlist=None, arch=BackendDevice.Grayskull):
+    def __init__(self, r: int, c: int, ids: tuple, be_api = None, netlist=None, runtime=None, arch=BackendDevice.Grayskull):
         self.r = r
         self.c = c
         self.r_cores = 10
         self.c_cores = 12 if arch == BackendDevice.Grayskull else 8
         self.queue_lim = 30
-        self.ids = ids
+        self.ids = ids # unused
         self.allocators = {}
         self.be_api = be_api
         self.arch = arch
         self.netlist = netlist
+        self.runtime = runtime
 
         if (self.arch == BackendDevice.Grayskull):
             self.chan_picker = tt_dram_chan_picker.distributed
@@ -72,10 +83,16 @@ class tt_simd_cluster():
         id = r * self.c + c
         return id
 
+    def init_tensor_slice_in_dram(self, chip_id, chan, address):
+        logging.debug(f"init_tensor_slice_to_dram - chip_id:{chip_id} chan:{chan} address:{address}")
+        self.dram_accessor.init_tensor_slice(chip_id=chip_id, chan=chan, addr=address)
+
     def write_tensor_slice_to_dram(self, chip_id, data, chan, address):
+        logging.debug(f"write_tensor_slice_to_dram - chip_id:{chip_id} data.shape:{data.shape} chan:{chan} address.shape:{address.shape}")
         self.dram_accessor.write_tensor_slice(chip_id=chip_id, data=data, chan=chan, addr=address)
 
     def read_tensor_slice_from_dram(self, chip_id, data_shape, chan, address, torch_dtype):
+        logging.debug(f"read_tensor_slice_from_dram - chip_id:{chip_id} data_shape:{data_shape} chan:{chan} address.shape:{address.shape} torch_dtype:{torch_dtype}")
         return self.dram_accessor.read_tensor_slice(chip_id, data_shape, chan, address, torch_dtype)
 
     def set_up_allocators(self, alloc_list: list): # list of 4 entry tuples (dtype, block size, number of blocks, base_address)

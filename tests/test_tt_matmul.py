@@ -40,6 +40,7 @@ def test_matmul(target_arch):
     op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 64
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+    simd.netlist = netlist
 
     dims = 64, 512, 512
     shape0 = (1, dims[0], dims[1])

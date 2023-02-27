@@ -19,7 +19,7 @@ from IPython import embed
 from argparse import ArgumentParser
 
 def test_broadcast(target_arch):
-    simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
+    simd = tt_simd_cluster(1, 2, [0,], be_api, arch=target_arch)
     target_devices = {0,1}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -28,46 +28,39 @@ def test_broadcast(target_arch):
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
     op_dtype = tt_op_dtype(dtype)
-    block_size = 64
+    block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+    simd.netlist = netlist
+    simd.runtime = runtime
 
-    shape = (1, 1, 1, 256, 256)
+    shape = (1, 1, 1, 256, 512)
     A = torch.randn(shape)
 
-    logging.info("Creating empty tt_tensor")
+    logging.info("Creating input tt_tensor")
 
     tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
 
     logging.info("Pushing data to device RAM")
 
-    # Change to use to_device, it should technically work. We should debug together tomorrow if not
-    tt_A.to_device(A)
+    tt_A.to_device(0, A)
 
-    output_shape_blocked = (1, 2, 1, 256 // block_size, 256 // block_size)
-    output = tt_tensor(block_size=block_size, simd_cluster=simd, shape=output_shape_blocked, dtype=dtype)
+    logging.info("Running shard")
 
-    logging.info("Running ttf.broadcast")
+    sharded_tensor = tt_A.shard(-2,-1)
 
-    ttf.broadcast(tt_A, output, runtime=runtime)
+    logging.info("Running unshard")
 
-    logging.info("Ran ttf.broadcast Getting tensors from device")
+    output_unsharded = sharded_tensor.unshard(-2, -1)
 
-    # Change to work like this
-    out = output.unshard()
-    out = output.from_device()
+    logging.info("Reading from device")
 
-    logging.info(f"Received output from devices {output.shape[0]}x{output.shape[1]}")
+    out = output_unsharded.from_device(0)
 
     # destroy bbe before checking errors, otherwise runtime does not clean up and next test hangs
     be_api.finish_child_process()
     backend.destroy()
 
-    # compare the output from each chip
-    for chip_r in range(output_shape_blocked[0]):
-        for chip_c in range(output_shape_blocked[1]):
-            device_out = out[chip_r][chip_c][:][:][:]
-            print(f"device_out[{chip_r}][{chip_c}]={device_out}")
-            assert torch.allclose(device_out, A, atol=1e-03, rtol=1e-02)
+    assert torch.allclose(out, A[0][0], atol=1e-03, rtol=1e-02)
     print('Test passed: SUCCESS')
 
 def main(target_arch):
