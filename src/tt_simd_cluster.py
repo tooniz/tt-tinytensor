@@ -61,7 +61,8 @@ class tt_simd_cluster():
             self.chan_picker = tt_dram_chan_picker.distributed
         else:
             # wh a0 enforces dram buffers to be on the same chan for scatter, Sean has a fix WIP
-            self.chan_picker = tt_dram_chan_picker.roundrobin_tensor
+            # @budabackend#1050 tracking matmul hang using roundrobin_block chan picker
+            self.chan_picker = tt_dram_chan_picker.constant
 
         #self.netlist_api = tt_netlist
         if(be_api is not None):
