@@ -1,4 +1,5 @@
 import torch
+import math
 from tt_malloc import tt_malloc
 from tt_simd_cluster import tt_simd_cluster, tt_dram_chan_picker
 from eager_backend import BackendStatusCode
@@ -74,7 +75,7 @@ class tt_tensor():
                 # list_shape[-1] = int(list_shape[-1] * block_size)
                 # list_shape[-2] = int(list_shape[-2] * block_size)
                 # zeros = torch.full(list_shape,33.0,dtype=self.torch_dtype)
-                self.init_on_devices(iterations=self.shape[-3])
+                self.init_on_devices(iterations=math.prod(self.shape[:-2]))
 
 
     def __del__(self):
