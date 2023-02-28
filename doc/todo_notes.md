@@ -7,6 +7,25 @@
 # High level philosophy
 How to capture pipeline behaviors clean
 
+# API Usability
+- Why does the user
+  - set up and tear down the backend?
+  - pass around a runtime to every tensor and op?
+  - create allocators at arbitrary and unchecked DRAM addresses?
+- What is the ideal sharding API for tensor parallelism?
+- Should we take advantage of a tensor frontend like TinyGrad and implement a TT SIMD backend for it?
+
+# Generic Issues
+- layernorm is slow because it contains lots of ops and is not compiled (pipelined) or fused
+- stable softmax is difficult because reduce_max generates column of tiles, breaking the assumption of "square blocks"
+- forcing `t=1` incurs large overhead since we make a new op for each `t`
+- replace folding with t-streaming?
+
+# Future Sharding Improvements
+- implement multi-chip `reduce` & `reduce_scatter`
+- shard w/out copying whole tensor to each chip first
+- allow sharding with `grid_size: [8,8]` queues
+
 # Allocator functionality:
 - Hashing to six / 8 channels and hashed address generation for multi-channel
 - Consider whether the base address adding and multiply by block size should be done in tensor.get_list() as opposed to tt_malloc
