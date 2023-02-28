@@ -32,6 +32,7 @@ def test_matmul(target_arch):
     simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
+
     backend = Backend(config, target_devices)
     be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
@@ -90,9 +91,9 @@ def test_matmul_2xchip(target_arch):
     target_devices = {0, 1}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
-    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float16
     op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128
@@ -557,6 +558,57 @@ def test_layernorm(target_arch):
     be_api.finish_child_process()
     backend.destroy()
 
+def test_layernorm_2xchip(target_arch):
+    '''
+    Input on a 2x1 cluster, sharded by rows
+    '''
+    simd = tt_simd_cluster(2, 1, [0,], be_api, arch=target_arch)
+    target_devices = set(simd.get_chip_ids())
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices)
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend)
+    dtype = tt_dtype.Float32
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 256
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+    simd.netlist = netlist
+    simd.runtime = runtime
+
+    shape = (1, 4, 2048, 512)
+    A = torch.randn(shape)  # activation for layernorm
+    normalized_shape = shape[-1]
+    gamma = torch.randn(normalized_shape)
+    beta = torch.randn(normalized_shape)
+    golden = torch.nn.functional.layer_norm(A, gamma.size(), weight=gamma, bias=beta, eps=1e-05)
+
+    logging.info("Pushing tt_A to device")
+    tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype).to_device(0, A)
+
+    logging.info("Sharding tt_A")
+    sharded_A = tt_A.shard(-2, -1)
+
+    logging.info("Expanding gamma and beta to match sharded_A")
+    gamma_expand = gamma.expand(sharded_A.size())
+    beta_expand = beta.expand(sharded_A.size())
+    tt_gamma = tt_tensor(block_size, simd, torch_tensor=gamma_expand, dtype=dtype).to_device(0, gamma_expand)
+    tt_beta = tt_tensor(block_size, simd, torch_tensor=beta_expand, dtype=dtype).to_device(0, beta_expand)
+
+    logging.info("Running LayerNorm")
+    tt_out = ttf.layer_norm(sharded_A, tt_beta, tt_gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=(1,1,1))
+
+    logging.info("Unsharding output")
+    unsharded_out = tt_out.unshard(-2, -1)
+
+    logging.info("Getting output from device")
+    out = unsharded_out.from_device(0)
+
+    mse = torch.mean((out - golden)**2)
+    logging.info(f"Mean Squared Error: {mse}")
+
+    be_api.finish_child_process()
+    backend.destroy()
 
 def test_reduce_max(target_arch):
     simd = tt_simd_cluster(0, 0, [0,], be_api, arch=target_arch)
@@ -596,6 +648,8 @@ def main(target_arch, test):
     # test_softmax(target_arch)
     if test == "layernorm":
         test_layernorm(target_arch)
+    if test == "layernorm_2xchip":
+        test_layernorm_2xchip(target_arch)
     if test == "matmul_1d":
         test_matmul_2xchip_1d_weight_stationary(target_arch)
 
@@ -603,7 +657,7 @@ if __name__ == '__main__':
     logging.basicConfig(level="INFO")
     parser = ArgumentParser()
     parser.add_argument('--device', '-d', help='Device: {wh, gs}', default='wh')
-    parser.add_argument('--test', '-t', help='Test: {matmul, matmul_2xchip, layernorm}', default='layernorm')
+    parser.add_argument('--test', '-t', help='Sub-test name', default='layernorm')
     args = parser.parse_args()
     target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole}[args.device]
     main(target_arch, args.test)

@@ -386,6 +386,11 @@ class tt_tensor():
     def stride(self):
         return self.address_tensor.stride()
 
+    def size(self):
+        tensor_shape = list(self.shape)
+        tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
+        tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
+        return tuple(tensor_shape)
 
     def calculate_shard_shape_and_stride(self, input_shape, input_shape_with_chips, input_strides, original_shape, original_strides, split_dim, split_chips):
         # only accept negative number dimension representation
