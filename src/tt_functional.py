@@ -29,7 +29,7 @@ def reduce_id(input, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime=None
             torch_zero_ones = reduce_ones(torch_ones_shape[-2],input.virtual_block_size)
             torch_zero_ones = torch_zero_ones.broadcast_to(torch_ones_shape)
             ones.to_device(0, torch_zero_ones)
-            out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, tens, ones, op_dtype)
+            out = runtime.netlist.binary_tensor_op(tt_net_op_types.matmul, tens, ones, op_dtype, runtime.simd_cluster.get_chip_ids())
             status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
             assert status == BackendStatusCode.Success
             runtime.backend.wait_for_idle()
@@ -87,7 +87,7 @@ def tt_binary_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dtype(tt_dtype.
         else:
             lin_folded, rin_folded = fold_inputs_for_mm(lin, rin, rowfactor=row_fold, colfactor=col_fold, idfactor=id_fold)
             folded = True
-    out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype)
+    out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype, runtime.simd_cluster.get_chip_ids())
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
     runtime.backend.wait_for_idle()
@@ -124,7 +124,7 @@ def tt_binary_elementwise_op(op: tt_net_op_types, lin, rin, op_dtype = tt_op_dty
         else:
             lin_folded, rin_folded = fold_inputs(lin, rin, row_fold, col_fold)
 
-    out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype)
+    out = runtime.netlist.binary_tensor_op(op, lin_folded, rin_folded, op_dtype, runtime.simd_cluster.get_chip_ids())
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
     runtime.backend.wait_for_idle()
@@ -152,7 +152,7 @@ def tt_unary_elementwise_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_
             lin_folded = lin
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
-    out = runtime.netlist.unary_tensor_op(op, lin_folded, op_dtype)
+    out = runtime.netlist.unary_tensor_op(op, lin_folded, op_dtype, runtime.simd_cluster.get_chip_ids())
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
     runtime.backend.wait_for_idle()
@@ -182,7 +182,7 @@ def tt_reduce_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_dtype.Float
             lin_folded = fold_input(lin, row_fold, col_fold)
 
     assert col_fold == 1
-    out = runtime.netlist.reduce_tensor_op(op, lin_folded, op_dtype)
+    out = runtime.netlist.reduce_tensor_op(op, lin_folded, op_dtype, runtime.simd_cluster.get_chip_ids())
     status = runtime.backend.compile_and_run_netlist(runtime.netlist.get_last_netlist_name(), {})
     assert status == BackendStatusCode.Success
     runtime.backend.wait_for_idle()

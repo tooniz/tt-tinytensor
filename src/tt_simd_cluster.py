@@ -83,6 +83,9 @@ class tt_simd_cluster():
         id = r * self.c + c
         return id
 
+    def get_chip_ids(self):
+        return [self.get_chip_id(r,c) for r in range(self.r) for c in range(self.c)]
+
     def init_tensor_slice_in_dram(self, chip_id, chan, address):
         logging.debug(f"init_tensor_slice_to_dram - chip_id:{chip_id} chan:{chan} address:{address}")
         self.dram_accessor.init_tensor_slice(chip_id=chip_id, chan=chan, addr=address)

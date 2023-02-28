@@ -20,9 +20,12 @@ gs_tests=(
     "test_tt_functional.py"
 )
 wh_tests=(
-    # "test_tt_tensor.py"
-    "test_tt_matmul.py"
-    "test_tt_broadcast.py" # multichip test
+    "test_tt_tensor.py"
+    "test_tt_matmul.py -t matmul"
+    "test_tt_matmul.py -t layernorm"
+    # multichip tests
+    "test_tt_matmul.py -t matmul_2xchip"
+    "test_tt_broadcast.py" 
 )
 
 # -------------------------------------------------------------------
@@ -43,7 +46,7 @@ tid=0
 result=0
 status=$PASS
 for test in "${tests[@]}"; do
-    logfile=test$tid.$test.log
+    logfile=tt_test$tid.log
     printf "\033[1mRunning: $test \033[0m \t($logfile)\n"
     $runner $DIR/tests/$test -d $device 2>&1 >> $logfile
     RETCODE=$?

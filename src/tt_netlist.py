@@ -1,5 +1,6 @@
 import yaml
 from enum import Enum
+from copy import deepcopy
 
 from tt_tensor import tt_tensor
 from tt_dtype import tt_dtype
@@ -42,20 +43,20 @@ class tt_netlist:
         self.next_netlist_idx = 0
         self.arch = arch
 
-    def unary_copy_op(self, l_input: tt_tensor, output: tt_tensor, chip_id: int  = 0):
+    def unary_copy_op(self, l_input: tt_tensor, output: tt_tensor, chip_ids: list = [0]):
         # make output tensor
         op_dtype = tt_op_dtype(dtype=l_input.dtype, dtype_accum=l_input.dtype, dtype_intermed=l_input.dtype)
-        self.unary_slice_op(tt_net_op_types.nop, l_input, output, op_dtype, chip_id)
+        self.unary_slice_op(tt_net_op_types.nop, l_input, output, op_dtype, chip_ids)
         self.dump_netlist()
 
-    def unary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype, chip_id: int  = 0):
+    def unary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype, chip_ids: list = [0]):
         # make output tensor
         out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape, dtype=op_dtype.dt)
-        self.unary_slice_op(op, l_input, out_tens, op_dtype, chip_id)
+        self.unary_slice_op(op, l_input, out_tens, op_dtype, chip_ids)
         self.dump_netlist()
         return out_tens
 
-    def unary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_id: int):
+    def unary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_ids: list):
         # flatten out the dimensions that will be iterated through for computation
         l_input_flat = l_input.address_tensor.flatten(start_dim=0,end_dim=-3)
         output_flat = output.address_tensor.flatten(start_dim=0,end_dim=-3)
@@ -72,8 +73,8 @@ class tt_netlist:
             # go through the current r_c slice and define queue
             rdim = l_input.address_tensor.shape[-2]
             cdim = l_input.address_tensor.shape[-1]
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice), target_device=chip_id)
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_id)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim,cdim], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice), target_device=chip_ids)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim,cdim], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_ids)
 
         # make graphs and ops for current tensor slices
         for slice in range(iterations):
@@ -83,16 +84,16 @@ class tt_netlist:
             rdim = output.address_tensor.shape[-2]
             cdim = output.address_tensor.shape[-1]
 
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin'], in_df = [l_input.dtype], op_dtype = op_dtype, target_device=chip_id)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin'], in_df = [l_input.dtype], op_dtype = op_dtype, target_device=chip_ids)
 
-    def reduce_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype):
+    def reduce_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, op_dtype: tt_op_dtype, chip_ids: list = [0]):
         lshape = list(l_input.shape)
         lshape.pop()
         lshape.append(1)
 
         out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=tuple(lshape), dtype=op_dtype.dt)
 
-        self.unary_slice_op(tt_net_op_types.reduce, l_input, out_tens, op_dtype)
+        self.unary_slice_op(tt_net_op_types.reduce, l_input, out_tens, op_dtype, chip_ids)
 
         self.dump_netlist()
 
@@ -135,7 +136,7 @@ class tt_netlist:
         self.unary_slice_bcast_op(tt_net_op_types.nop, l_input, output, src_chip_id, op_dtype)
         self.dump_netlist()
 
-    def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype):
+    def binary_tensor_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, op_dtype: tt_op_dtype, chip_ids: list = [0]):
         # make output tensor
         if(op is tt_net_op_types.matmul):
             lshape = list(l_input.shape)
@@ -146,7 +147,7 @@ class tt_netlist:
         else:
             out_tens = tt_tensor(block_size=l_input.virtual_block_size, simd_cluster=l_input.simd_cluster, shape=l_input.shape, dtype=op_dtype.dt)
 
-        self.binary_slice_op(op, l_input, r_input, out_tens, op_dtype)
+        self.binary_slice_op(op, l_input, r_input, out_tens, op_dtype, chip_ids)
 
         self.dump_netlist()
 
@@ -159,7 +160,7 @@ class tt_netlist:
         # return output tiny tensor
         return out_tens
 
-    def binary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype):
+    def binary_slice_op(self, op: tt_net_op_types, l_input: tt_tensor, r_input: tt_tensor, output: tt_tensor, op_dtype: tt_op_dtype, chip_ids: list):
         # flatten out the dimensions that will be iterated through for computation
         l_input_flat = l_input.address_tensor.flatten(start_dim=0,end_dim=-3)
         r_input_flat = r_input.address_tensor.flatten(start_dim=0,end_dim=-3)
@@ -192,9 +193,10 @@ class tt_netlist:
                 rdim_r = r_input.address_tensor.shape[-2]
                 cdim_r = r_input.address_tensor.shape[-1]
                 cdim_out = r_input.address_tensor.shape[-1]
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim_l,cdim_l], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice))
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_rin', type = tt_net_op_types.ram, block_size = r_input.block_size, grid_size = [rdim_r,cdim_r], inputs = ['HOST'], op_dtype = tt_op_dtype(r_input.dtype), dram= r_input.get_dram_list(slice))
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim_out,cdim_out], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice))
+
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_lin', type = tt_net_op_types.ram, block_size = l_input.block_size, grid_size = [rdim_l,cdim_l], inputs = ['HOST'], op_dtype = tt_op_dtype(l_input.dtype), dram= l_input.get_dram_list(slice), target_device=chip_ids)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_rin', type = tt_net_op_types.ram, block_size = r_input.block_size, grid_size = [rdim_r,cdim_r], inputs = ['HOST'], op_dtype = tt_op_dtype(r_input.dtype), dram= r_input.get_dram_list(slice), target_device=chip_ids)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name = slice_queue_name+'_out', type = tt_net_op_types.ram, block_size = output.block_size, grid_size = [rdim_out,cdim_out], inputs = [slice_op_name], op_dtype = tt_op_dtype(output.dtype), dram= output.get_dram_list(slice), target_device=chip_ids)
 
         # make graphs and ops for current tensor slices
         for slice in range(iterations):
@@ -204,7 +206,7 @@ class tt_netlist:
             rdim = output.address_tensor.shape[-2]
             cdim = output.address_tensor.shape[-1]
 
-            self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype, lin_transpose=l_input.transpose_r_c, rin_transpose=r_input.transpose_r_c)
+            self.add_op(slice_idx=slice, lin_tensor=l_input, name=slice_op_name, type=op, block_size=output.block_size, grid_size = [rdim,cdim], inputs = [slice_queue_name+'_lin', slice_queue_name+'_rin'], in_df = [l_input.dtype,r_input.dtype], op_dtype = op_dtype, lin_transpose=l_input.transpose_r_c, rin_transpose=r_input.transpose_r_c, target_device=chip_ids)
 
     # this will be needed when some chips do not have ops on them
     def add_empty_graph(self, slice_idx: int, target_device: int = 0):
@@ -222,7 +224,7 @@ class tt_netlist:
             in_df: list = None,
             \
             entries: int = 1,
-            target_device: int = 0,
+            target_device: list = [0],
             loc: str = 'dram',
             dram: list = [],
             \
@@ -281,7 +283,7 @@ class tt_netlist:
         if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             op_val_dict['input'] = inputs[0]
             op_val_dict['entries'] = entries
-            op_val_dict['target_device'] = target_device
+            op_val_dict['target_device'] = deepcopy(target_device)
             op_val_dict['loc'] = loc
             op_val_dict['dram'] = dram
             op_val_dict['df'] = out_df
@@ -336,9 +338,13 @@ class tt_netlist:
         if(type == tt_net_op_types.queue or type == tt_net_op_types.ram):
             self.doc['queues'][name] = op_val_dict
         else:
-            self.graph_op_name = 'graph_op_' + str(target_device) + "_" + str(slice_idx) + "_" + str(self.next_netlist_idx)
+            if isinstance(target_device, list):
+                graph_device = 'multichip' if len(target_device) > 1 else str(target_device[0])
+            else:
+                graph_device = str(target_device)
+            self.graph_op_name = 'graph_op_' + str(graph_device) + "_" + str(slice_idx) + "_" + str(self.next_netlist_idx)
             self.doc['graphs'][self.graph_op_name] = {}
-            self.doc['graphs'][self.graph_op_name]['target_device'] = target_device
+            self.doc['graphs'][self.graph_op_name]['target_device'] = deepcopy(target_device)
             self.doc['graphs'][self.graph_op_name]['input_count'] = 1
             self.doc['graphs'][self.graph_op_name][name] = op_val_dict
 
