@@ -101,7 +101,7 @@ def test_matmul_2xchip(target_arch):
     simd.netlist = netlist
     simd.runtime = runtime
 
-    dims = 256, 512, 512, 256
+    dims = 256, 1024, 1024, 1024
     shape0 = (1, dims[0], dims[1])
     shape1 = (1, dims[1], dims[2])
     shape2 = (1, dims[2], dims[3])
@@ -118,12 +118,12 @@ def test_matmul_2xchip(target_arch):
     tt_C = tt_tensor(block_size, simd, torch_tensor=C, dtype=dtype)
 
     logging.info("Pushing data to device RAM")
-    tt_A.to_device(0, A)
-    tt_B.to_device(0, B)
-    tt_C.to_device(0, C)
+    tt_A.to_device(0, A, 1, 4) # n0
+    tt_B.to_device(0, B, 1, 8) # n1
+    tt_C.to_device(0, C, 1, 8) # n2
 
     logging.info("Sharding tt_B")
-    sharded_B = tt_B.shard(-2, -1)
+    sharded_B = tt_B.shard(-2, -1) # n3
 
     logging.info("Sharding tt_C")
     sharded_C = tt_C.shard(-2, -1)
