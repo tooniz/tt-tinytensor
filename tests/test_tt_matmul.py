@@ -83,6 +83,9 @@ def test_matmul(target_arch):
     backend.destroy()
 
 def test_matmul_2xchip(target_arch):
+    '''
+    A @ B @ C on a 1x2 cluster. B and C sharded by columns
+    '''
     simd = tt_simd_cluster(1, 2, [0,], be_api, arch=target_arch)
     target_devices = {0, 1}
     config = be_api.get_runtime_config(target_arch)
@@ -138,6 +141,94 @@ def test_matmul_2xchip(target_arch):
 
     logging.info("Getting output from device")
     out = output_unsharded_1.from_device(0)
+
+    logging.info("Received output from device")
+    mse = torch.mean((out - golden)**2)
+    logging.info(f"Mean Squared Error: {mse}")
+
+    logging.debug(f"golden.shape:{golden.shape}")
+    logging.debug(f"out.shape:{out.shape}")
+
+    logging.info(f'Expected: {golden}')
+    logging.info(f'Received: {out}')
+
+    # A_from = tt_A.from_device(0)
+    # B_from = tt_B.from_device(0)
+
+    # assert torch.allclose(A, A_from)
+    # assert torch.allclose(B, B_from)
+    # print('Test passed: SUCCESS')
+
+    # Why is user doing this cleanup??
+    be_api.finish_child_process()
+    backend.destroy()
+
+def test_matmul_2xchip_1d_weight_stationary(target_arch):
+    '''
+    A @ B @ C on a 1x2 cluster. B sharded by columns, C sharded by rows
+    '''
+    simd = tt_simd_cluster(1, 2, [0,], be_api, arch=target_arch)
+    target_devices = {0, 1}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float16
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 128
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+    simd.netlist = netlist
+    simd.runtime = runtime
+
+    dims = 256, 512, 512, 256
+    shape0 = (1, dims[0], dims[1])
+    shape1 = (1, dims[1], dims[2])
+    shape2 = (1, dims[2], dims[3])
+    A = torch.randn(shape0)
+    B = torch.randn(shape1)
+    C = torch.randn(shape2)
+    hidden = torch.matmul(A, B)
+    golden = torch.matmul(hidden, C)
+
+    logging.info("Creating empty tt_tensors")
+
+    tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
+    tt_B = tt_tensor(block_size, simd, torch_tensor=B, dtype=dtype)
+    tt_C = tt_tensor(block_size, simd, torch_tensor=C, dtype=dtype)
+
+    logging.info("Pushing data to device RAM")
+    tt_A.to_device(0, A)
+    tt_B.to_device(0, B)
+    tt_C.to_device(0, C)
+
+    logging.info("Sharding tt_B")
+    sharded_B = tt_B.shard(rsplit_dim=-2, csplit_dim=-1)
+
+    logging.info("Sharding tt_C")
+    sharded_C = tt_C.shard(rsplit_dim=-2, csplit_dim=-2)
+
+    logging.info("Running ttf.matmul A*B")
+    tt_out_0 = ttf.matmul(tt_A, sharded_B, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Ran ttf.matmul A*B. Leave output sharded in dim=-1")
+
+    logging.info("Running ttf.matmul hidden*C")
+    tt_out_1 = ttf.matmul(tt_out_0, sharded_C, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Ran ttf.matmul hidden*C. Unsharding output")
+    output_unsharded_1 = tt_out_1.unshard(rsplit_dim=-2, csplit_dim=-1)
+
+    logging.info("unsharded output contains the partial products stacked in the column dimension")
+    output_shape = (1, dims[0]//block_size, dims[3]//block_size)
+    logging.info("Defining a tensor for each partial product")
+    output_A = tt_tensor(block_size, simd, shape=output_shape, addr_tensor=output_unsharded_1.address_tensor[:,:,:2], parent_tensor=output_unsharded_1)
+    output_B = tt_tensor(block_size, simd, shape=output_shape, addr_tensor=output_unsharded_1.address_tensor[:,:,2:], parent_tensor=output_unsharded_1)
+    logging.info("Reducing the partial products into final output")
+    output_reduced = ttf.add(output_A, output_B, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Getting output from device")
+    out = output_reduced.from_device(0)
 
     logging.info("Received output from device")
     mse = torch.mean((out - golden)**2)
@@ -505,6 +596,8 @@ def main(target_arch, test):
     # test_softmax(target_arch)
     if test == "layernorm":
         test_layernorm(target_arch)
+    if test == "matmul_1d":
+        test_matmul_2xchip_1d_weight_stationary(target_arch)
 
 if __name__ == '__main__':
     logging.basicConfig(level="INFO")

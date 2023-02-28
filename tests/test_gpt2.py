@@ -163,7 +163,7 @@ def tt_gpt2(target_arch):
     
 
     '''
-    MLP & residual (TODO)
+    MLP & residual
     '''
     ff1 = torch.randn(1, dm, 4*dm)
     ff2 = torch.randn(1, 4*dm, dm)
