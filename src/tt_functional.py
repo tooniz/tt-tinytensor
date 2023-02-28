@@ -293,7 +293,7 @@ def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runti
     reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
     sumo = reduce(lin, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
     sumo = sumo.unsqueeze(-1)
-    numel = torch.fill(torch.empty((1,1,1,lin.block_size, lin.block_size)), 1/(lin.shape[-1]*lin.block_size)) # tensor filled w/ number of elements in reduce dim
+    numel = torch.fill(torch.empty((1,lin.block_size, lin.block_size)), 1/(lin.shape[-1]*lin.block_size)) # tensor filled w/ number of elements in reduce dim
     tt_numel = tt_tensor(lin.block_size, runtime.simd_cluster, torch_tensor=numel, dtype=lin.dtype).to_device(0, numel)
     avg = multiply(sumo, tt_numel, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     # VARIANCE
@@ -301,10 +301,10 @@ def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runti
     sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     var_unnormalized = reduce(sqr, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
     # TODO: divide by numel to compute variance
+    var_unnormalized = var_unnormalized.unsqueeze(-1)
     var = multiply(var_unnormalized, tt_numel, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     sqrto = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
     recip = reciprocal(sqrto, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-    recip = recip.unsqueeze(-1)
     scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     g_scaled = multiply(scaled_diff, gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     out = add(g_scaled, beta, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
