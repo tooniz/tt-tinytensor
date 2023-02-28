@@ -417,18 +417,21 @@ def test_reduce_max(target_arch):
     be_api.finish_child_process()
     backend.destroy()
 
-def main(target_arch):
-    # test_matmul(target_arch)
+def main(target_arch, test):
+    if test == "matmul":
+        test_matmul(target_arch)
     # test_matmul_gelu(target_arch)
     # test_matmul_gelu_matmul(target_arch)
     # test_attn(target_arch)
     # test_softmax(target_arch)
-    test_layernorm(target_arch)
+    if test == "layernorm":
+        test_layernorm(target_arch)
 
 if __name__ == '__main__':
     logging.basicConfig(level="INFO")
     parser = ArgumentParser()
     parser.add_argument('--device', '-d', help='Device: {wh, gs}', default='wh')
+    parser.add_argument('--test', '-t', help='Test: {matmul, layernorm}', default='layernorm')
     args = parser.parse_args()
     target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole}[args.device]
-    main(target_arch)
+    main(target_arch, args.test)
