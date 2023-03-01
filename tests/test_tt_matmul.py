@@ -22,6 +22,75 @@ def mean_absolute_fraction_error(exp, rec):
     mae = torch.mean(torch.abs((exp - rec)))
     return mae / torch.mean(torch.abs(exp))
 
+def test_matmul_galaxy(target_arch):
+    simd = tt_simd_cluster(1, 8, [0,], be_api, arch=target_arch)
+    target_devices = {0, 3, 4, 7, 1, 2, 17, 8}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices)
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend)
+    dtype = tt_dtype.Float16
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 256
+    simd.set_up_allocators([(dtype, block_size, 4000, 250000000)])
+    simd.netlist = netlist
+    simd.runtime = runtime
+
+    dims = 512, 2048, 2048, 2048
+    shape0 = (1, dims[0], dims[1])
+    shape1 = (1, dims[1], dims[2])
+    shape2 = (1, dims[2], dims[3])
+    A = torch.randn(shape0)
+    B = torch.randn(shape1)
+    C = torch.randn(shape2)
+    hidden = torch.matmul(A, B)
+    golden = torch.matmul(hidden, C)
+
+    logging.info("Creating empty tt_tensors")
+
+    tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
+    tt_B = tt_tensor(block_size, simd, torch_tensor=B, dtype=dtype)
+    tt_C = tt_tensor(block_size, simd, torch_tensor=C, dtype=dtype)
+
+    logging.info("Pushing data to device RAM")
+    tt_A.to_device(0, A, 1, 1)
+    tt_B.to_device(0, B, 2, 1)
+    tt_C.to_device(0, C, 2, 1)
+
+    logging.info("Sharding tt_B")
+    sharded_B = tt_B.shard(-2, -1)
+
+    logging.info("Sharding tt_C")
+    sharded_C = tt_C.shard(-2, -1)
+
+    logging.info("Running ttf.matmul A*B")
+    tt_out_0 = ttf.matmul(tt_A, sharded_B, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Ran ttf.matmul A*B. Unsharding output")
+    output_unsharded_0 = tt_out_0.unshard(-2, -1)
+
+    logging.info("Running ttf.matmul hidden*C")
+    tt_out_1 = ttf.matmul(output_unsharded_0, sharded_C, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Ran ttf.matmul hidden*C. Unsharding output")
+    output_unsharded_1 = tt_out_1.unshard(-2, -1)
+
+    logging.info("Getting output from device")
+    out = output_unsharded_1.from_device(0)
+
+    logging.info("Received output from device")
+    mse = torch.mean((out - golden)**2)
+    logging.info(f"Mean Squared Error: {mse}")
+
+    logging.debug(f"golden.shape:{golden.shape}")
+    logging.debug(f"out.shape:{out.shape}")
+
+    logging.info(f'Expected: {golden}')
+    logging.info(f'Received: {out}')
+
+    be_api.finish_child_process()
+    backend.destroy()
 
 def test_matmul(target_arch):
     '''
@@ -642,6 +711,8 @@ def main(target_arch, test):
         test_matmul(target_arch)
     if test == "matmul_2xchip":
         test_matmul_2xchip(target_arch)
+    if test == "matmul_galaxy":
+        test_matmul_galaxy(target_arch)
     # test_matmul_gelu(target_arch)
     # test_matmul_gelu_matmul(target_arch)
     # test_attn(target_arch)

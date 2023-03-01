@@ -18,9 +18,10 @@ from eager_backend.backend_api import Backend, BackendConfig, PytorchTensorDesc
 from IPython import embed
 from argparse import ArgumentParser
 
-def test_broadcast(target_arch):
-    simd = tt_simd_cluster(1, 2, [0,], be_api, arch=target_arch)
-    target_devices = {0,1}
+def test_broadcast(target_arch, num_chips):
+    assert num_chips == 8 or num_chips == 2
+    simd = tt_simd_cluster(1, num_chips, [0,], be_api, arch=target_arch)
+    target_devices = {0, 3, 4, 7, 1, 2, 17, 8} if num_chips == 8 else {0, 1}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
     be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
@@ -33,7 +34,7 @@ def test_broadcast(target_arch):
     simd.netlist = netlist
     simd.runtime = runtime
 
-    shape = (1, 1, 1, 256, 512)
+    shape = (1, 1, 1, 256, block_size*num_chips)
     A = torch.randn(shape)
 
     logging.info("Creating input tt_tensor")
@@ -63,12 +64,13 @@ def test_broadcast(target_arch):
     assert torch.allclose(out, A[0][0], atol=1e-03, rtol=1e-02)
     print('Test passed: SUCCESS')
 
-def main(target_arch):
-    test_broadcast(target_arch)
+def main(target_arch, num_chips):
+    test_broadcast(target_arch, num_chips)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--device', '-d', help='Device: {wh, gs}', default='wh')
+    parser.add_argument('--num_chips', '-n', type=int, help='Num_chips: {2, 8}', default=2)
     args = parser.parse_args()
     target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole}[args.device]
-    main(target_arch)
+    main(target_arch, args.num_chips)
