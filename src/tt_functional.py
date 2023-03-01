@@ -143,6 +143,8 @@ def tt_unary_elementwise_op(op: tt_net_op_types, lin, op_dtype = tt_op_dtype(tt_
         col_fold = int(lin.shape[-1] / min_dim)
 
         if(lin.shape[-2] <= runtime.simd_cluster.r_cores and lin.shape[-1] <= runtime.simd_cluster.c_cores):
+            row_fold = 1
+            col_fold = 1
             lin_folded = lin
         else:
             lin_folded = fold_input(lin, row_fold, col_fold)
