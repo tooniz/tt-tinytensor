@@ -699,9 +699,10 @@ def test_layernorm(target_arch):
 
 def test_layernorm_2xchip(target_arch):
     '''
-    Input on a 2x1 cluster, sharded by rows
+    LayerNorm on a 2x1 cluster, row-parallel
     '''
-    simd = tt_simd_cluster(2, 1, [0,], be_api, arch=target_arch)
+    num_chips = 2
+    simd = tt_simd_cluster(num_chips, 1, [0,], be_api, arch=target_arch)
     target_devices = set(simd.get_chip_ids())
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
@@ -715,36 +716,42 @@ def test_layernorm_2xchip(target_arch):
     simd.netlist = netlist
     simd.runtime = runtime
 
-    shape = (1, 4, 2048, 512)
-    A = torch.randn(shape)  # activation for layernorm
+    shape = (1, 4, 1024, 768)
+    A = torch.randn(shape)
     normalized_shape = shape[-1]
-    gamma = torch.randn(normalized_shape)
-    beta = torch.randn(normalized_shape)
+
+    gamma  = torch.randn(normalized_shape)
+    beta   = torch.randn(normalized_shape)
     golden = torch.nn.functional.layer_norm(A, gamma.size(), weight=gamma, bias=beta, eps=1e-05)
 
-    logging.info("Pushing tt_A to device")
+    logging.info("Pushing activations to device RAM")
     tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype).to_device(0, A)
 
     logging.info("Sharding tt_A")
     sharded_A = tt_A.shard(-2, -1)
 
-    logging.info("Expanding gamma and beta to match sharded_A")
+    logging.info("Expanding gamma and beta to match shards")
     gamma_expand = gamma.expand(sharded_A.size())
-    beta_expand = beta.expand(sharded_A.size())
-    tt_gamma = tt_tensor(block_size, simd, torch_tensor=gamma_expand, dtype=dtype).to_device(0, gamma_expand)
-    tt_beta = tt_tensor(block_size, simd, torch_tensor=beta_expand, dtype=dtype).to_device(0, beta_expand)
+    beta_expand  = beta.expand(sharded_A.size())
 
-    logging.info("Running LayerNorm")
+    logging.info("Pushing weights to device RAM")
+    tt_gamma = tt_tensor(block_size, simd, torch_tensor=gamma_expand, dtype=dtype).to_device(0, gamma_expand)
+    tt_beta  = tt_tensor(block_size, simd, torch_tensor=beta_expand, dtype=dtype).to_device(0, beta_expand)
+
+    logging.info("Running ttf.layer_norm")
     tt_out = ttf.layer_norm(sharded_A, tt_beta, tt_gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=(1,1,1))
 
-    logging.info("Unsharding output")
+    logging.info("Ran ttf.layer_norm. Unsharding output")
     unsharded_out = tt_out.unshard(-2, -1)
 
-    logging.info("Getting output from device")
+    logging.info("Ran ttf.layer_norm. Getting output from device")
     out = unsharded_out.from_device(0)
 
-    mse = torch.mean((out - golden)**2)
-    logging.info(f"Mean Squared Error: {mse}")
+    logging.info("Received output from device")
+    logging.info(f"MAFE: {mean_absolute_fraction_error(golden, out)}")
+
+    logging.info(f'Expected: {golden}')
+    logging.info(f'Recieved: {out}')
 
     be_api.finish_child_process()
     backend.destroy()

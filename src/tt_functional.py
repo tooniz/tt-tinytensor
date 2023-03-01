@@ -288,8 +288,6 @@ def softmax(lin, dim, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, 
 def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runtime = None, fold_factors: tuple = None):
     assert runtime is not None, "Don't call tt_functional op without runtime"
 
-    import pdb
-    #pdb.set_trace()
     # MEAN
     reduce_fold_factors = list(fold_factors)
     reduce_fold_factors[1] = 1 # We can't fold columns on the reduction, or the reduced tensor going into reciprocal
@@ -298,16 +296,22 @@ def layer_norm(lin, beta, gamma, op_dtype = tt_op_dtype(tt_dtype.Float16), runti
     numel = torch.fill(torch.empty((1,lin.block_size, lin.block_size)), 1/(lin.shape[-1]*lin.block_size)) # tensor filled w/ number of elements in reduce dim
     tt_numel = tt_tensor(lin.block_size, runtime.simd_cluster, torch_tensor=numel, dtype=lin.dtype).to_device(0, numel)
     avg = multiply(sumo, tt_numel, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
-    # VARIANCE
+
+    # DIFF = X - MEAN
     diff = subtract(lin, avg, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+
+    # VARIANCE
     sqr = multiply(diff, diff, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     var_unnormalized = reduce(sqr, dim=-1, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
-    # TODO: divide by numel to compute variance
     var_unnormalized = var_unnormalized.unsqueeze(-1)
     var = multiply(var_unnormalized, tt_numel, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+
+    # DIFF / SQRT(VARIANCE)
     sqrto = sqrt(var, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
     recip = reciprocal(sqrto, op_dtype=op_dtype, runtime=runtime, fold_factors=tuple(reduce_fold_factors))
     scaled_diff = multiply(diff, recip, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
+
+    # RESULT * GAMMA + BETA
     g_scaled = multiply(scaled_diff, gamma, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     out = add(g_scaled, beta, op_dtype=op_dtype, runtime=runtime, fold_factors=fold_factors)
     return out
