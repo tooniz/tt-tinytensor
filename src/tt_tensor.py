@@ -153,6 +153,26 @@ class tt_tensor():
     #                 chip_id = self.simd_cluster.get_chip_id(chip_r, chip_c)
     #                 self.simd_cluster.write_tensor_slice_to_dram(chip_id=chip_id, data=self.block_tensor_slice(torch_in_flat[slice], block_dim=self.block_size), chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
 
+    def fold_input(self, rowfactor, colfactor):
+        assert self.shape[-1] % colfactor == 0
+        assert self.shape[-2] % rowfactor == 0
+
+        # figure out reshaped dims
+        out_cols = int(self.shape[-1] / colfactor)
+        out_rows = int(self.shape[-2] / rowfactor)
+        #reshape
+        shape = list(self.shape)
+        # pop off the row and column dimensions
+        shape.pop()
+        shape.pop()
+        # add the reshaped bottom dimensions
+        shape.extend([rowfactor,out_rows,colfactor,out_cols])
+        # reshape
+        lrshp = self.reshape(shape)
+        # swap axes to make r,c at bottom
+        lrshp = lrshp.swapaxes(-2,-3)
+        return lrshp
+
     def init_on_devices(self, iterations: int):
         assert self.simd_cluster.r != 0 and self.simd_cluster.c != 0, "Writing to empty cluster"
         dim_chip_r = self.simd_cluster.r
@@ -164,7 +184,7 @@ class tt_tensor():
                     chip_id = self.simd_cluster.get_chip_id(chip_r, chip_c)
                     self.simd_cluster.init_tensor_slice_in_dram(chip_id=chip_id, chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
 
-    def to_device(self, chip_id: int, torch_in: torch.Tensor):
+    def to_device(self, chip_id: int, torch_in: torch.Tensor, rowfactor=1, colfactor=1):
         assert self.torch_dtype is not None
 
         # convert input tensor to expected input data type
@@ -184,7 +204,8 @@ class tt_tensor():
         # broadcast the tensor to all chips via netlist
         runtime = self.simd_cluster.runtime
         if(self.simd_cluster.r != 1 or self.simd_cluster.c != 1):
-            self.simd_cluster.netlist.unary_tensor_bcast_op(self, self, chip_id)
+            folded_input = self.fold_input(rowfactor,colfactor)
+            self.simd_cluster.netlist.unary_tensor_bcast_op(folded_input, folded_input, chip_id)
             status = runtime.backend.compile_and_run_netlist(self.simd_cluster.netlist.get_last_netlist_name(), {})
             assert status == BackendStatusCode.Success
             runtime.backend.wait_for_idle()
@@ -386,6 +407,11 @@ class tt_tensor():
     def stride(self):
         return self.address_tensor.stride()
 
+    def size(self):
+        tensor_shape = list(self.shape)
+        tensor_shape[-1] = int(tensor_shape[-1] *  self.block_size)
+        tensor_shape[-2] = int(tensor_shape[-2] *  self.block_size)
+        return tuple(tensor_shape)
 
     def calculate_shard_shape_and_stride(self, input_shape, input_shape_with_chips, input_strides, original_shape, original_strides, split_dim, split_chips):
         # only accept negative number dimension representation

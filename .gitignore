@@ -1,2 +1,11 @@
 __pycache__/
 venv/
+
+bbe
+tt_build
+
+.hlkc_cache
+.vscode
+
+*.log
+/*.yaml

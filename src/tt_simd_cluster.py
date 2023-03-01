@@ -80,6 +80,19 @@ class tt_simd_cluster():
             self.dram_accessor = tt_dram_accessor(be_api)
 
     def get_chip_id(self, r: int, c: int):
+        # TODO: should be read from cluster_desc.yaml
+        galaxy_chip_ids = {
+            (0,0):0,
+            (0,1):3,
+            (0,2):4,
+            (0,3):7,
+            (0,4):8,
+            (0,5):17,
+            (0,6):2,
+            (0,7):1,
+        }
+        if self.c > 2:
+            return galaxy_chip_ids[(r,c)]
         id = r * self.c + c
         return id
 

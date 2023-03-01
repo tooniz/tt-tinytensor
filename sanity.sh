@@ -25,7 +25,10 @@ wh_tests=(
     "test_tt_matmul.py -t layernorm"
     # multichip tests
     "test_tt_matmul.py -t matmul_2xchip"
+    "test_tt_matmul.py -t layernorm_2xchip"
     "test_tt_broadcast.py" 
+    # galaxy tests
+    "test_tt_matmul.py -t matmul_galaxy"
 )
 
 # -------------------------------------------------------------------
