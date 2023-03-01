@@ -442,13 +442,16 @@ def test_matmul_gelu_matmul(target_arch):
     backend.destroy()
 
 def test_matmul_gelu_matmul_galaxy(target_arch):
+    '''
+    gelu(A @ B) @ C on a 1x8 cluster. B, C sharded by columns
+    '''
     simd = tt_simd_cluster(1, 8, [0,], be_api, arch=target_arch)
     target_devices = {0, 3, 4, 7, 1, 2, 17, 8}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
-    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float32
     op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128
