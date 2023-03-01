@@ -441,6 +441,73 @@ def test_matmul_gelu_matmul(target_arch):
     be_api.finish_child_process()
     backend.destroy()
 
+def test_matmul_gelu_matmul_galaxy(target_arch):
+    simd = tt_simd_cluster(1, 2, [0,], be_api, arch=target_arch)
+    target_devices = {0, 1}
+    config = be_api.get_runtime_config(target_arch)
+    backend = Backend(config, target_devices)
+    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float32
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 128
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+    simd.netlist = netlist
+    simd.runtime = runtime
+
+    dims = 256, 1024, 1024, 1024
+    shape0 = (1, dims[0], dims[1])
+    shape1 = (1, dims[1], dims[2])
+    shape2 = (1, dims[2], dims[3])
+    A = torch.randn(shape0)
+    B = torch.randn(shape1)
+    C = torch.randn(shape2)
+    golden = torch.matmul(torch.nn.functional.gelu(torch.matmul(A, B)), C)
+
+    logging.info("Creating empty tt_tensors")
+
+    tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
+    tt_B = tt_tensor(block_size, simd, torch_tensor=B, dtype=dtype)
+    tt_C = tt_tensor(block_size, simd, torch_tensor=C, dtype=dtype)
+
+    logging.info("Pushing data to device RAM")
+    tt_A.to_device(0, A)
+    tt_B.to_device(0, B, 4, 2)
+    tt_C.to_device(0, C, 4, 2)
+
+    logging.info("Sharding tt_B")
+    sharded_B = tt_B.shard(-2, -1)
+
+    logging.info("Sharding tt_C")
+    sharded_C = tt_C.shard(-2, -1)
+
+    logging.info("Running ttf.matmul1")
+    tt_ff1_out = ttf.matmul(tt_A, sharded_B, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Running ttf.gelu")
+    tt_gelu_out = ttf.gelu(tt_ff1_out, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Unsharding gelu out")
+    tt_gelu_out_unsharded = tt_gelu_out.unshard(-2, -1)
+
+    logging.info("Running ttf.matmul2")
+    tt_ff2_out = ttf.matmul(tt_gelu_out_unsharded, sharded_C, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Ran ttf.matmul hidden*C. Unsharding output")
+    tt_ff2_out_unsharded = tt_ff2_out.unshard(-2, -1)
+
+    logging.info("Ran ttf.matmul. Getting output from device")
+    out = tt_ff2_out_unsharded.from_device(0)
+
+    logging.info("Received output from device")
+    logging.info(f"MAFE: {mean_absolute_fraction_error(golden, out)}")
+
+    logging.info(f'Expected: {golden}')
+    logging.info(f'Recieved: {out}')
+
+    be_api.finish_child_process()
+    backend.destroy()
 
 def test_attn(target_arch):
     '''
@@ -714,6 +781,8 @@ def main(target_arch, test):
     if test == "matmul_galaxy":
         test_matmul_galaxy(target_arch)
     # test_matmul_gelu(target_arch)
+    if test == "matmul_gelu_matmul_galaxy":
+        test_matmul_gelu_matmul_galaxy(target_arch)
     # test_matmul_gelu_matmul(target_arch)
     # test_attn(target_arch)
     # test_softmax(target_arch)
