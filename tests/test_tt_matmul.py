@@ -442,8 +442,8 @@ def test_matmul_gelu_matmul(target_arch):
     backend.destroy()
 
 def test_matmul_gelu_matmul_galaxy(target_arch):
-    simd = tt_simd_cluster(1, 2, [0,], be_api, arch=target_arch)
-    target_devices = {0, 1}
+    simd = tt_simd_cluster(1, 8, [0,], be_api, arch=target_arch)
+    target_devices = {0, 3, 4, 7, 1, 2, 17, 8}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
     be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
