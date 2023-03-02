@@ -6,6 +6,7 @@ tt_build
 
 .hlkc_cache
 .vscode
+.devcontainer
 
 *.log
 /*.yaml

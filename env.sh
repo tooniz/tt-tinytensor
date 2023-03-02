@@ -1,6 +1,15 @@
-export PYTHONPATH=/localdev/cglagovich/budabackend/build/obj/py_api:/localdev/cglagovich/budabackend/py_api/tests:/localdev/cglagovich/tinytensor/:/localdev/cglagovich/tinytensor/src/:/localdev/cglagovich/tinytensor/tests/:$PYTHONPATH
+#!/bin/sh
 
-source venv/bin/activate
+if [ ! -d "./bbe" ] 
+then
+    echo "Directory 'bbe' not found. Please create a symlink from your budabackend repo to 'bbe'" 
+    exit 9999 # die with error code 9999
+fi
 
 export ARCH_NAME=wormhole
-cd ../budabackend && make && make eager_backend && make loader/tests/test_eager_ops
+export ROOT=`git rev-parse --show-toplevel`
+export BUDA_HOME=$ROOT/bbe
+export PYTHONPATH=$ROOT:$ROOT/src:$ROOT/tests:$ROOT/bbe/build/obj/py_api:$ROOT/bbe/py_api/tests:$PYTHONPATH
+
+echo "Building bbe..."
+make -C bbe -j16 build_hw eager_backend
