@@ -377,7 +377,7 @@ def test_matmul_gelu_matmul(target_arch):
     backend = Backend(config, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
-    dtype = tt_dtype.Float32
+    dtype = tt_dtype.Float32 if target_arch == BackendDevice.Wormhole else tt_dtype.Float16_b
     op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
@@ -640,7 +640,7 @@ def test_layernorm(target_arch):
     backend = Backend(config, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
-    dtype = tt_dtype.Float32
+    dtype = tt_dtype.Float32 if target_arch == BackendDevice.Wormhole else tt_dtype.Float16_b
     op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
     block_size = 128
     simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
@@ -761,10 +761,11 @@ def main(target_arch, test):
         test_matmul_2xchip(target_arch)
     if test == "matmul_galaxy":
         test_matmul_galaxy(target_arch)
-    # test_matmul_gelu(target_arch)
+    if test == "matmul_gelu_matmul":
+        test_matmul_gelu_matmul(target_arch)
     if test == "matmul_gelu_matmul_galaxy":
         test_matmul_gelu_matmul_galaxy(target_arch)
-    # test_matmul_gelu_matmul(target_arch)
+    # test_matmul_gelu(target_arch)
     # test_attn(target_arch)
     # test_softmax(target_arch)
     if test == "layernorm":

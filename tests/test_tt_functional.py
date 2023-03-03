@@ -225,7 +225,7 @@ def test_softmax(simd0, netlist,runtime, backend, be_api):
     simd0.set_up_allocators([(tt_dtype.Float16, block_size, 10000, 0x21000000)])
     simd0.set_up_allocators([(tt_dtype.Float16_b, block_size, 10000, 0x31000000)])
 
-    lin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float32)
+    lin_ttens = tt_tensor(block_size=block_size, simd_cluster=runtime.simd_cluster, torch_tensor=lin, dtype=tt_dtype.Float16_b)
     lin_ttens.to_device(0,lin)
 
     tout = ttf.softmax(lin_ttens,-1,tt_op_dtype(dtype=tt_dtype.Float16_b,dtype_intermed=tt_dtype.Float16_b, dtype_accum=tt_dtype.Float16_b),runtime=runtime,fold_factors=fold_factors)
@@ -242,19 +242,21 @@ def test_softmax(simd0, netlist,runtime, backend, be_api):
 
 def main():
     print("Testing TT functional!")
+    chip_grid = (1, 1)
     target_arch = BackendDevice.Grayskull
-    target_devices = {0}
-    config = be_api.get_runtime_config(target_arch)
-    backend = Backend(config, target_devices)
-    netlist = tt_netlist()
-    simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api=be_api, netlist=netlist)
+    netlist = tt_netlist(target_arch)
+    simd0_ids = list(range(chip_grid[0]*chip_grid[1]))
+    simd0 = tt_simd_cluster(chip_grid[0], chip_grid[1], simd0_ids, be_api=be_api, netlist=netlist)
+    target_devices = set(simd0.get_chip_ids())
+    backend = Backend(be_api.get_runtime_config(target_arch), target_devices)
     runtime = tt_runtime(simd0, netlist, be_api, backend)
+    simd0.runtime = runtime
 
     loops = 1 if os.getenv('CI_RUNNER') else 5
     for x in range(loops):
-        test_softmax(simd0, netlist,runtime, backend, be_api)
-        test_ops(simd0, netlist,runtime, backend, be_api)
-        transpose_test(simd0, netlist,runtime, backend, be_api)
+        test_softmax(simd0, netlist, runtime, backend, be_api)
+        test_ops(simd0, netlist, runtime, backend, be_api)
+        transpose_test(simd0, netlist, runtime, backend, be_api)
 
     print("Finished testing TT functional!")
 

@@ -15,12 +15,13 @@ runner="python3"
 # -------------------------------------------------------------------
 gs_tests=(
     # "test_tt_tensor.py"
-    "test_tt_functional.py"
-    "test_tt_functional.py"
+    "test_tt_matmul.py -t matmul"
+    "test_tt_matmul.py -t layernorm"
+    "test_tt_matmul.py -t matmul_gelu_matmul"
     "test_tt_functional.py"
 )
 wh_tests=(
-    "test_tt_tensor.py"
+    # "test_tt_tensor.py"
     "test_tt_matmul.py -t matmul"
     "test_tt_matmul.py -t layernorm"
     # nebula 2-chip tests

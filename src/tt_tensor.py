@@ -2,7 +2,7 @@ import torch
 import math
 from tt_malloc import tt_malloc
 from tt_simd_cluster import tt_simd_cluster, tt_dram_chan_picker
-from eager_backend import BackendStatusCode
+from eager_backend import BackendStatusCode, BackendDevice
 from tt_dtype import tt_dtype
 from tt_dtype import tt_op_dtype
 import logging
@@ -177,12 +177,14 @@ class tt_tensor():
         assert self.simd_cluster.r != 0 and self.simd_cluster.c != 0, "Writing to empty cluster"
         dim_chip_r = self.simd_cluster.r
         dim_chip_c = self.simd_cluster.c
+
         # init all slices
         for slice in range(iterations):
             for chip_r in range(dim_chip_r):
                 for chip_c in range(dim_chip_c):
                     chip_id = self.simd_cluster.get_chip_id(chip_r, chip_c)
                     self.simd_cluster.init_tensor_slice_in_dram(chip_id=chip_id, chan=self.get_dram_chan_tensor_slice(slice), address=self.get_dram_addr_tensor_slice(slice))
+
 
     def to_device(self, chip_id: int, torch_in: torch.Tensor, rowfactor=1, colfactor=1):
         assert self.torch_dtype is not None
