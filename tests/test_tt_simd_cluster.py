@@ -45,7 +45,6 @@ def grayskull_read_write_test():
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
 
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
     simd0.set_up_allocators([(tt_dtype.Float32, 128, 10000, 0x20000000)])
@@ -70,7 +69,6 @@ def grayskull_read_write_test():
         assert torch.allclose(tens,ble)
 
     simd0.check_allocator_end_state()
-    simd0.be_api.finish_child_process()
     backend.destroy()
     logging.info("Passed grayskull tensor read/write test")
 
@@ -79,7 +77,6 @@ def grayskull_matmul_test():
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
 
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api)
     netlist = tt_netlist()
@@ -88,7 +85,6 @@ def grayskull_matmul_test():
     random_slice_matmuls(10,simd0,netlist,backend)
 
     simd0.check_allocator_end_state()
-    simd0.be_api.finish_child_process()
     backend.destroy()
 
     logging.info("Passed grayskull matmul test")

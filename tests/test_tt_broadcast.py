@@ -24,7 +24,6 @@ def test_broadcast(target_arch, num_chips):
     target_devices = {0, 3, 4, 7, 1, 2, 17, 8} if num_chips == 8 else {0, 1}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -58,7 +57,6 @@ def test_broadcast(target_arch, num_chips):
     out = output_unsharded.from_device(0)
 
     # destroy bbe before checking errors, otherwise runtime does not clean up and next test hangs
-    be_api.finish_child_process()
     backend.destroy()
 
     assert torch.allclose(out, A[0][0], atol=1e-03, rtol=1e-02)

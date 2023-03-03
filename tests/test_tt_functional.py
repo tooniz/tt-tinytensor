@@ -246,7 +246,6 @@ def main():
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist()
     simd0 = tt_simd_cluster(4,8, list(range(4*8)), be_api=be_api, netlist=netlist)
     runtime = tt_runtime(simd0, netlist, be_api, backend)
@@ -259,7 +258,6 @@ def main():
 
     print("Finished testing TT functional!")
 
-    be_api.finish_child_process()
     backend.destroy()
     # print("Successfully done test")
 if __name__ == "__main__":

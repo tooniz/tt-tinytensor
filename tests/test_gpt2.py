@@ -31,7 +31,6 @@ def tt_gpt2(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float32
@@ -197,7 +196,6 @@ def tt_gpt2(target_arch):
     logging.info(f'GPT2 decoder output MAE: {mean_absolute_fraction_error(gpt2_out, tt_gpt2_out_cpu):.3f}')
 
 
-    be_api.finish_child_process()
     backend.destroy()
 
 

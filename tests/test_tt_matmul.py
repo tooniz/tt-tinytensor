@@ -27,7 +27,6 @@ def test_matmul_galaxy(target_arch):
     target_devices = {0, 3, 4, 7, 1, 2, 17, 8}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float16
@@ -89,7 +88,6 @@ def test_matmul_galaxy(target_arch):
     logging.info(f'Expected: {golden}')
     logging.info(f'Received: {out}')
 
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_matmul(target_arch):
@@ -103,7 +101,6 @@ def test_matmul(target_arch):
     config = be_api.get_runtime_config(target_arch)
 
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float16
@@ -148,8 +145,6 @@ def test_matmul(target_arch):
     # assert torch.allclose(B, B_from)
     # print('Test passed: SUCCESS')
 
-    # Why is user doing this cleanup??
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_matmul_2xchip(target_arch):
@@ -160,7 +155,6 @@ def test_matmul_2xchip(target_arch):
     target_devices = {0, 1}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float16
@@ -229,8 +223,6 @@ def test_matmul_2xchip(target_arch):
     # assert torch.allclose(B, B_from)
     # print('Test passed: SUCCESS')
 
-    # Why is user doing this cleanup??
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_matmul_2xchip_1d_weight_stationary(target_arch):
@@ -241,7 +233,6 @@ def test_matmul_2xchip_1d_weight_stationary(target_arch):
     target_devices = {0, 1}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float16
@@ -317,8 +308,6 @@ def test_matmul_2xchip_1d_weight_stationary(target_arch):
     # assert torch.allclose(B, B_from)
     # print('Test passed: SUCCESS')
 
-    # Why is user doing this cleanup??
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_matmul_gelu(target_arch):
@@ -331,7 +320,6 @@ def test_matmul_gelu(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -375,8 +363,6 @@ def test_matmul_gelu(target_arch):
     # assert torch.allclose(B, B_from)
     # print('Test passed: SUCCESS')
 
-    # Why is user doing this cleanup??
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_matmul_gelu_matmul(target_arch):
@@ -389,7 +375,6 @@ def test_matmul_gelu_matmul(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -437,8 +422,6 @@ def test_matmul_gelu_matmul(target_arch):
     # assert torch.allclose(B, B_from)
     # print('Test passed: SUCCESS')
 
-    # Why is user doing this cleanup??
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_matmul_gelu_matmul_galaxy(target_arch):
@@ -449,7 +432,6 @@ def test_matmul_gelu_matmul_galaxy(target_arch):
     target_devices = {0, 3, 4, 7, 1, 2, 17, 8}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float32
@@ -509,7 +491,6 @@ def test_matmul_gelu_matmul_galaxy(target_arch):
     logging.info(f'Expected: {golden}')
     logging.info(f'Recieved: {out}')
 
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_attn(target_arch):
@@ -520,7 +501,6 @@ def test_attn(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -620,7 +600,6 @@ def test_attn(target_arch):
     print('attn out MAFE:', mean_absolute_fraction_error(attn_out, tt_attn_out_cpu))
 
     
-    be_api.finish_child_process()
     backend.destroy()
 
 
@@ -629,7 +608,6 @@ def test_softmax(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -653,7 +631,6 @@ def test_softmax(target_arch):
 
     print('MAFE:', mean_absolute_fraction_error(exp, tt_out_cpu))
 
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_layernorm(target_arch):
@@ -661,7 +638,6 @@ def test_layernorm(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -694,7 +670,6 @@ def test_layernorm(target_arch):
 
     print('MAFE:', mean_absolute_fraction_error(exp, tt_out_cpu))
 
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_layernorm_2xchip(target_arch):
@@ -706,7 +681,6 @@ def test_layernorm_2xchip(target_arch):
     target_devices = set(simd.get_chip_ids())
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend)
     dtype = tt_dtype.Float32
@@ -753,7 +727,6 @@ def test_layernorm_2xchip(target_arch):
     logging.info(f'Expected: {golden}')
     logging.info(f'Recieved: {out}')
 
-    be_api.finish_child_process()
     backend.destroy()
 
 def test_reduce_max(target_arch):
@@ -761,7 +734,6 @@ def test_reduce_max(target_arch):
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
     backend = Backend(config, target_devices)
-    be_api.initialize_child_process(target_arch, target_devices) # Why is user launching child process?
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
     dtype = tt_dtype.Float32
@@ -780,7 +752,6 @@ def test_reduce_max(target_arch):
     tt_out_cpu = tt_out.from_device(0)
     print(tt_out_cpu)
 
-    be_api.finish_child_process()
     backend.destroy()
 
 def main(target_arch, test):

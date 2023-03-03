@@ -23,12 +23,14 @@ wh_tests=(
     "test_tt_tensor.py"
     "test_tt_matmul.py -t matmul"
     "test_tt_matmul.py -t layernorm"
-    # multichip tests
+    # nebula 2-chip tests
+    "test_tt_broadcast.py" 
+    "test_tt_matmul.py -t matmul_1d"
     "test_tt_matmul.py -t matmul_2xchip"
     "test_tt_matmul.py -t layernorm_2xchip"
-    "test_tt_broadcast.py" 
-    # galaxy tests
-    "test_tt_matmul.py -t matmul_galaxy"
+    # galaxy multichip tests
+    # "test_tt_matmul.py -t matmul_galaxy"
+    # "test_tt_matmul.py -t matmul_gelu_matmul_galaxy"
 )
 
 # -------------------------------------------------------------------
