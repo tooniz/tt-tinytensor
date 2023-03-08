@@ -22,7 +22,7 @@ gs_tests=(
 )
 wh_tests=(
     # "test_tt_tensor.py"
-    "test_tt_matmul.py -t matmul"
+    "test_tt_matmul.py -t matmul_iterations"
     "test_tt_matmul.py -t layernorm"
     # nebula 2-chip tests
     "test_tt_broadcast.py" 

@@ -30,6 +30,7 @@ def tt_gpt2(target_arch):
     simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
     target_devices = {0}
     config = be_api.get_runtime_config(target_arch)
+    config.enable_replay_buffer()
     backend = Backend(config, target_devices)
     netlist = tt_netlist(target_arch)
     runtime = tt_runtime(simd, netlist, be_api, backend)
@@ -195,6 +196,17 @@ def tt_gpt2(target_arch):
 
     logging.info(f'GPT2 decoder output MAE: {mean_absolute_fraction_error(gpt2_out, tt_gpt2_out_cpu):.3f}')
 
+    # Insert WFI between replayed netlists
+    wait_for_idle = True
+
+    # Replay and measure run time for gpt2 decoder
+    for iter in range(10):
+        start = time.time()
+        backend.replay(0, -1, wait_for_idle)
+        end = time.time()
+        logging.info(f"Replay Iter{iter} - Time: {end - start}")
+        tt_gpt2_replay_out = tt_gpt2_out.from_device(0)
+        assert mean_absolute_fraction_error(tt_gpt2_out_cpu, tt_gpt2_replay_out) == 0, "Replay must produce the same result!"
 
     backend.destroy()
 

@@ -147,6 +147,79 @@ def test_matmul(target_arch):
 
     backend.destroy()
 
+def test_matmul_iterations(target_arch):
+    simd = tt_simd_cluster(1, 1, [0,], be_api, arch=target_arch)
+    target_devices = {0}
+    config = be_api.get_runtime_config(target_arch)
+    config.enable_replay_buffer()
+    backend = Backend(config, target_devices)
+    netlist = tt_netlist(target_arch)
+    runtime = tt_runtime(simd, netlist, be_api, backend) # Why is the runtime a thing?
+    dtype = tt_dtype.Float16
+    op_dtype = tt_op_dtype(dtype, dtype_intermed=dtype, dtype_accum=dtype)
+    block_size = 64
+    simd.set_up_allocators([(dtype, block_size, 2000, 250000000)])
+    simd.netlist = netlist
+
+    dims = 64, 512, 512
+    shape0 = (1, dims[0], dims[1])
+    shape1 = (1, dims[1], dims[2])
+
+    A = torch.randn(shape0)
+    B = torch.randn(shape1)
+    golden = torch.matmul(A, B)
+
+    logging.info("Creating empty tt_tensors")
+
+    tt_A = tt_tensor(block_size, simd, torch_tensor=A, dtype=dtype)
+    tt_B = tt_tensor(block_size, simd, torch_tensor=B, dtype=dtype)
+
+    logging.info("Pushing data to device RAM")
+    tt_A.to_device(0, A)
+    tt_B.to_device(0, B)
+
+    logging.info("Running ttf.matmul")
+    tt_out = ttf.matmul(tt_A, tt_B, op_dtype=op_dtype, runtime=runtime)
+
+    logging.info("Ran ttf.matmul. Getting output from device")
+    out = tt_out.from_device(0)
+
+    logging.info("Received output from device")
+    mse = torch.mean((out - golden)**2)
+    logging.info(f"Mean Squared Error: {mse}")
+
+    logging.info(f'Expected: {golden}')
+    logging.info(f'Recieved: {out}')
+
+    import time
+    for iter in range(10):
+        A = torch.randn(shape0)
+        B = torch.randn(shape1)
+        golden = torch.matmul(A, B)
+
+        start = time.time()
+
+        tt_A.to_device(0, A)
+        tt_B.to_device(0, B)
+
+        # Replay all netlists (0 to -1) with WFI
+        backend.replay(0, -1, True)
+
+        out = tt_out.from_device(0)
+        end = time.time()
+
+        logging.info(f"I{iter} - Received output from device")
+        logging.info(f"I{iter} - Time: {end - start}")
+
+        mse = torch.mean((out - golden)**2)
+        logging.info(f"I{iter} - Mean Squared Error: {mse}")
+        logging.info(f'Expected: {golden}')
+        logging.info(f'Recieved: {out}')
+
+        assert mse < 1e-3, "the MSE is too damn high!!!"
+
+    backend.destroy()
+
 def test_matmul_2xchip(target_arch):
     '''
     A @ B @ C on a 1x2 cluster. B and C sharded by columns
@@ -757,6 +830,8 @@ def test_reduce_max(target_arch):
 def main(target_arch, test):
     if test == "matmul":
         test_matmul(target_arch)
+    if test == "matmul_iterations":
+        test_matmul_iterations(target_arch)
     if test == "matmul_2xchip":
         test_matmul_2xchip(target_arch)
     if test == "matmul_galaxy":
