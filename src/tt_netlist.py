@@ -354,7 +354,8 @@ class tt_netlist:
 
     def arch_to_str(self, arch):
         arch_map = {BackendDevice.Grayskull: 'grayskull',
-                    BackendDevice.Wormhole: 'wormhole'}
+                    BackendDevice.Wormhole: 'wormhole',
+                    BackendDevice.Wormhole_B0: 'wormhole_b0'}
         return arch_map[arch]
 
     def dump_netlist(self):

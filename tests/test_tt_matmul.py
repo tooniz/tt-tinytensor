@@ -856,5 +856,5 @@ if __name__ == '__main__':
     parser.add_argument('--device', '-d', help='Device: {wh, gs}', default='wh')
     parser.add_argument('--test', '-t', help='Sub-test name', default='layernorm')
     args = parser.parse_args()
-    target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole}[args.device]
+    target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole, 'whb0': BackendDevice.Wormhole_B0}[args.device]
     main(target_arch, args.test)

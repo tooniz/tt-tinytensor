@@ -33,17 +33,24 @@ wh_tests=(
     # "test_tt_matmul.py -t matmul_galaxy"
     # "test_tt_matmul.py -t matmul_gelu_matmul_galaxy"
 )
+whb0_tests=(
+    "test_tt_matmul.py -t matmul"
+    "test_tt_matmul.py -t layernorm"
+    # nebula 2-chip tests
+    "test_tt_matmul.py -t matmul_1d"
+    "test_tt_matmul.py -t matmul_2xchip"
+    "test_tt_matmul.py -t layernorm_2xchip"
+)
 
 # -------------------------------------------------------------------
 # MAIN RUNNER
 # -------------------------------------------------------------------
-if [ "$device" == "gs" ]; then
-    tests=("${gs_tests[@]}")
-elif [ "$device" == "wh" ]; then
-    tests=("${wh_tests[@]}")
+if [ "$device" == "gs" ] || [ "$device" == "wh" ] || [ "$device" == "whb0" ]; then
+    suite=${device}_tests[@]
+    tests=("${!suite}")
 else
     echo "Invalid device provided $device"
-    echo "Usage: $0 <gs,wh>"
+    echo "Usage: $0 <gs,wh,whb0>"
     exit 1
 fi
 echo "Launching sanity tests on $device ..."

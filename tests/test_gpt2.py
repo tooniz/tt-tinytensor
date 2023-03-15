@@ -197,7 +197,7 @@ def tt_gpt2(target_arch):
     logging.info(f'GPT2 decoder output MAE: {mean_absolute_fraction_error(gpt2_out, tt_gpt2_out_cpu):.3f}')
 
     # Insert WFI between replayed netlists
-    wait_for_idle = True
+    wait_for_idle = False
 
     # Replay and measure run time for gpt2 decoder
     for iter in range(10):
@@ -216,7 +216,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument('--device', '-d', help='Device: {wh, gs}', default='wh')
     args = parser.parse_args()
-    target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole}[args.device]
+    target_arch = {'gs': BackendDevice.Grayskull, 'wh': BackendDevice.Wormhole, 'whb0': BackendDevice.Wormhole_B0}[args.device]
 
     tt_gpt2(target_arch)
 
